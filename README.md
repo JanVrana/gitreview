@@ -26,7 +26,19 @@ gitreview is a single Go binary with no dependencies besides `git`. The frontend
 
 ## Install
 
-Prebuilt binary for Linux / macOS (amd64, arm64) into `~/.local/bin`:
+Linux / macOS (amd64, arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JanVrana/gitreview/main/install.sh | sh
+```
+
+The [script](install.sh) downloads the latest release binary, verifies its SHA-256 checksum and installs it to `~/.local/bin`. Set `GITREVIEW_INSTALL_DIR` for another directory or `GITREVIEW_VERSION=v0.2.0` for a specific release, for example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JanVrana/gitreview/main/install.sh | GITREVIEW_INSTALL_DIR=/usr/local/bin sudo -E sh
+```
+
+Without the script, download the binary directly:
 
 ```bash
 mkdir -p ~/.local/bin && curl -fL -o ~/.local/bin/gitreview \

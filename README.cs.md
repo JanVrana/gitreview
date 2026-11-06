@@ -24,7 +24,19 @@ Výsledkem je jedna Go binárka bez závislostí, frontend je v ní zabudovaný 
 
 ## Instalace
 
-Hotová binárka pro Linux / macOS (amd64, arm64) do `~/.local/bin`:
+Linux / macOS (amd64, arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JanVrana/gitreview/main/install.sh | sh
+```
+
+[Skript](install.sh) stáhne binárku z posledního releasu, ověří její SHA-256 součet a nainstaluje ji do `~/.local/bin`. Jiný adresář nastavíš přes `GITREVIEW_INSTALL_DIR`, konkrétní verzi přes `GITREVIEW_VERSION=v0.2.0`, např.:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JanVrana/gitreview/main/install.sh | GITREVIEW_INSTALL_DIR=/usr/local/bin sudo -E sh
+```
+
+Bez skriptu můžeš binárku stáhnout přímo:
 
 ```bash
 mkdir -p ~/.local/bin && curl -fL -o ~/.local/bin/gitreview \
