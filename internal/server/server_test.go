@@ -16,12 +16,16 @@ import (
 )
 
 func newTest(t *testing.T) (*httptest.Server, string) {
+	return newTestOpts(t, Options{AllowHosts: []string{"myvm"}})
+}
+
+func newTestOpts(t *testing.T, opts Options) (*httptest.Server, string) {
 	dir := testrepo.New(t)
 	r, err := git.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(r, fstest.MapFS{"index.html": {Data: []byte("ok")}}, []string{"myvm"})
+	s, err := New(r, fstest.MapFS{"index.html": {Data: []byte("ok")}}, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,5 +205,60 @@ func TestEventsOnChange(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no change event")
+	}
+}
+
+func TestTokenAuth(t *testing.T) {
+	const token = "s3cret-token"
+	ts, _ := newTestOpts(t, Options{Token: token})
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	status := func(req *http.Request) (*http.Response, int) {
+		t.Helper()
+		res, err := noRedirect.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res, res.StatusCode
+	}
+	req := func(method, path string) *http.Request {
+		r, _ := http.NewRequest(method, ts.URL+path, nil)
+		return r
+	}
+
+	for _, p := range []string{"/", "/api/info", "/api/events", "/?token=wrong", "/api/info?token=wrong"} {
+		if _, code := status(req("GET", p)); code != http.StatusUnauthorized {
+			t.Errorf("GET %s without valid token: %d, want 401", p, code)
+		}
+	}
+
+	// page load with the token: cookie + redirect to the clean URL
+	res, code := status(req("GET", "/?token="+token+"&x=1"))
+	if code != http.StatusSeeOther || res.Header.Get("Location") != "/?x=1" {
+		t.Fatalf("token page load: %d %q", code, res.Header.Get("Location"))
+	}
+	cookies := res.Cookies()
+	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].Value != token {
+		t.Fatalf("cookie: %+v", cookies)
+	}
+
+	withCookie := req("GET", "/api/info")
+	withCookie.AddCookie(cookies[0])
+	if _, code := status(withCookie); code != http.StatusOK {
+		t.Errorf("with cookie: %d", code)
+	}
+	bad := req("GET", "/api/info")
+	bad.AddCookie(&http.Cookie{Name: cookies[0].Name, Value: "nope"})
+	if _, code := status(bad); code != http.StatusUnauthorized {
+		t.Errorf("bad cookie: %d", code)
+	}
+	bearer := req("GET", "/api/info")
+	bearer.Header.Set("Authorization", "Bearer "+token)
+	if _, code := status(bearer); code != http.StatusOK {
+		t.Errorf("bearer: %d", code)
+	}
+	// API call with the token in the query is served directly (no redirect)
+	if _, code := status(req("GET", "/api/info?token="+token)); code != http.StatusOK {
+		t.Errorf("api with token query: %d", code)
 	}
 }

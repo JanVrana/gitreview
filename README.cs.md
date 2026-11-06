@@ -53,12 +53,26 @@ gitreview -p 9000 -b 127.0.0.1 .
 
 Potřebuje jen `git` v `PATH`.
 
-Při startu se vypíšou URL (IP adresy VM).
+Při startu se vypíšou URL (IP adresy VM) i s přístupovým tokenem, např. `http://192.168.1.20:8765/?token=3f9c…`. Otevři některou z nich v prohlížeči. Prohlížeč si token uloží do cookie, takže příště stačí i adresa bez tokenu.
 
-**Bezpečnost:** server nemá autentizaci. Na `0.0.0.0` ho používej jen v důvěryhodné síti, jinak `-b 127.0.0.1` a SSH tunel (`ssh -L 8765:localhost:8765 vm`).
+| Přepínač | Význam |
+|---|---|
+| `-p` | port (výchozí `8765`) |
+| `-b` | adresa, na které server poslouchá (výchozí `0.0.0.0`) |
+| `-allow-host` | další povolená jména v hlavičce `Host`, oddělená čárkou |
+| `-token` | pevný přístupový token místo náhodného (také `GITREVIEW_TOKEN`); záložky pak fungují i po restartu |
+| `-no-auth` | bez tokenu: UI může používat každý, kdo se dostane na port |
+| `-version` | vypíše verzi a skončí |
+
+**Bezpečnost:** každý požadavek potřebuje **přístupový token**. Ve výchozím stavu se při každém startu vygeneruje náhodný a vypíše se v URL. Pevný nastavíš přes `-token` nebo `GITREVIEW_TOKEN` (raději proměnnou, argumenty jsou vidět v `ps`). Token se přijímá jako `?token=` (vymění se za HttpOnly cookie a z adresy zmizí), jako cookie, nebo pro skripty jako `Authorization: Bearer <token>`.
+
+`-no-auth` token vypne, třeba na privátní VM nebo za SSH tunelem (`-b 127.0.0.1` + `ssh -L 8765:localhost:8765 vm`). Server běží na prostém http, takže v nedůvěryhodné síti jde token odposlechnout; tam použij tunel.
+
+Další ochrany, aktivní i s `-no-auth`:
 - Zápisy (komentáře, export) přijímá jen jako JSON ze stejného originu. Cizí web otevřený v prohlížeči tak nemůže podstrčit text do REVIEW.md.
 - Přístup přes doménové jméno je kvůli DNS rebindingu povolený jen pro IP adresy, `localhost` a hostname stroje. Další jména povolíš přes `-allow-host vm.firma.cz,dev-vm`.
 - Číst lze jen soubory ze seznamu změn.
+- Do repozitáře server jen čte, zapisuje pouze `REVIEW.md` a `.git/gitreview/comments.json`.
 
 ## Co umí
 

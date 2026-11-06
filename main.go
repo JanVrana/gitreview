@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime/debug"
 	"strconv"
@@ -47,9 +48,11 @@ func run() error {
 	port := flag.Int("p", 8765, "port")
 	bind := flag.String("b", "0.0.0.0", "listen address")
 	allow := flag.String("allow-host", "", "extra allowed host names, comma separated (IP addresses, localhost and the machine hostname are always allowed)")
+	token := flag.String("token", "", "access token (default: $GITREVIEW_TOKEN, or a random one generated at startup)")
+	noAuth := flag.Bool("no-auth", false, "disable the access token (anyone who can reach the port can use the UI)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [-b address] [-allow-host name,…] [repository path]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [-b address] [-allow-host name,…] [-token t | -no-auth] [repository path]\n\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -70,7 +73,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	srv, err := server.New(repo, web, allowedHosts(*allow))
+	if *token == "" {
+		*token = os.Getenv("GITREVIEW_TOKEN")
+	}
+	if *noAuth {
+		*token = ""
+	} else if *token == "" {
+		*token = server.NewToken()
+	}
+	srv, err := server.New(repo, web, server.Options{AllowHosts: allowedHosts(*allow), Token: *token})
 	if err != nil {
 		return err
 	}
@@ -80,8 +91,15 @@ func run() error {
 		return err
 	}
 	fmt.Printf("gitreview: %s\n", repo.Root)
+	suffix := "/"
+	if *token != "" {
+		suffix = "/?token=" + url.QueryEscape(*token)
+	}
 	for _, u := range urls(*bind, *port) {
-		fmt.Printf("  → %s\n", u)
+		fmt.Printf("  → %s%s\n", u, suffix)
+	}
+	if *token == "" {
+		fmt.Println("  ! authentication disabled (-no-auth)")
 	}
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	return hs.Serve(ln)

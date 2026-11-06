@@ -30,22 +30,31 @@ type Server struct {
 	store      *review.Store
 	web        fs.FS
 	allowHosts map[string]bool
+	auth       *tokenAuth // nil = no authentication
 	watch      *watcher
 }
 
+// Options configure a Server.
+type Options struct {
+	// AllowHosts lists extra host names (besides IP literals, localhost and
+	// the machine's hostname) the UI may be reached by.
+	AllowHosts []string
+	// Token is the access token required on every request; "" disables
+	// authentication.
+	Token string
+}
+
 // New creates a server for repo; web holds index.html and assets.
-// allowHosts lists extra host names (besides IP literals, localhost and the
-// machine's hostname) the UI may be reached by.
-func New(repo *git.Repo, web fs.FS, allowHosts []string) (*Server, error) {
+func New(repo *git.Repo, web fs.FS, opts Options) (*Server, error) {
 	dir, err := repo.GitPath("gitreview")
 	if err != nil {
 		return nil, err
 	}
 	hosts := map[string]bool{"localhost": true}
-	for _, h := range allowHosts {
+	for _, h := range opts.AllowHosts {
 		hosts[strings.ToLower(h)] = true
 	}
-	return &Server{repo: repo, store: review.NewStore(dir), web: web, allowHosts: hosts, watch: newWatcher(repo)}, nil
+	return &Server{repo: repo, store: review.NewStore(dir), web: web, allowHosts: hosts, auth: newTokenAuth(opts.Token), watch: newWatcher(repo)}, nil
 }
 
 // Handler returns the HTTP handler.
@@ -68,8 +77,8 @@ func (s *Server) Handler() http.Handler {
 	return s.guard(mux)
 }
 
-// guard protects the unauthenticated server against other web pages open in
-// the user's browser:
+// guard protects the server against other web pages open in the user's
+// browser and, unless disabled, requires the access token:
 //   - DNS rebinding: only IP literals, localhost and known host names are
 //     accepted in the Host header.
 //   - Cross-site writes: state-changing requests must be JSON (which forces a
@@ -81,6 +90,9 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		if !s.hostAllowed(r.Host) {
 			http.Error(w, "host not allowed – add it with -allow-host", http.StatusForbidden)
+			return
+		}
+		if s.auth != nil && !s.auth.check(w, r) {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {

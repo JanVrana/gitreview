@@ -53,13 +53,15 @@ gitreview /path/to/repo          # defaults: current directory, port 8765, 0.0.0
 gitreview -p 9000 -b 127.0.0.1 .
 ```
 
-On startup it prints the URLs it is reachable on (the machine's IP addresses). Open one of them in your browser.
+On startup it prints the URLs it is reachable on (the machine's IP addresses), each with an access token, e.g. `http://192.168.1.20:8765/?token=3f9c…`. Open one of them in your browser. The browser keeps the token in a cookie, so later visits to the plain address work too.
 
 | Flag | Meaning |
 |---|---|
 | `-p` | port (default `8765`) |
 | `-b` | listen address (default `0.0.0.0`) |
 | `-allow-host` | extra host names accepted in the `Host` header, comma separated |
+| `-token` | fixed access token instead of a random one (also `GITREVIEW_TOKEN`); keeps bookmarks working across restarts |
+| `-no-auth` | no access token: anyone who can reach the port can use the UI |
 | `-version` | print the version and exit |
 
 ### Review loop with an AI agent
@@ -72,7 +74,11 @@ On startup it prints the URLs it is reachable on (the machine's IP addresses). O
 
 ## Security
 
-The server has **no authentication**. Run it on `0.0.0.0` only in a trusted network; otherwise use `-b 127.0.0.1` and an SSH tunnel (`ssh -L 8765:localhost:8765 vm`).
+Every request needs the **access token**. By default a random token is generated at each start and printed in the URLs; set a fixed one with `-token` or `GITREVIEW_TOKEN` (prefer the variable, command-line arguments are visible in `ps`). The token is accepted as `?token=` (exchanged for an HttpOnly cookie and removed from the address bar), as the cookie, or as `Authorization: Bearer <token>` for scripts.
+
+`-no-auth` turns the token off, for example on a private VM or behind an SSH tunnel (`-b 127.0.0.1` + `ssh -L 8765:localhost:8765 vm`). The server runs over plain http, so on an untrusted network the token can be sniffed; use the tunnel there.
+
+Further protections, also active with `-no-auth`:
 
 - Writes (comments, export) are accepted only as same-origin JSON requests, so a foreign web page open in your browser cannot inject text into `REVIEW.md`.
 - To prevent DNS rebinding, the `Host` header must be an IP address, `localhost` or the machine's hostname. Allow other names with `-allow-host vm.example.com,dev-vm`.
