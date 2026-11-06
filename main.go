@@ -18,6 +18,7 @@ import (
 
 	"github.com/JanVrana/gitreview/internal/git"
 	"github.com/JanVrana/gitreview/internal/server"
+	"github.com/JanVrana/gitreview/internal/update"
 )
 
 //go:embed web
@@ -50,15 +51,20 @@ func run() error {
 	allow := flag.String("allow-host", "", "extra allowed host names, comma separated (IP addresses, localhost and the machine hostname are always allowed)")
 	token := flag.String("token", "", "access token (default: $GITREVIEW_TOKEN, or a random one generated at startup)")
 	noAuth := flag.Bool("no-auth", false, "disable the access token (anyone who can reach the port can use the UI)")
+	noAutoUpdate := flag.Bool("no-auto-update", false, "do not install new releases automatically (also GITREVIEW_NO_AUTO_UPDATE=1)")
+	doUpdate := flag.Bool("update", false, "install the latest release now and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [-b address] [-allow-host name,…] [-token t | -no-auth] [repository path]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [-b address] [-allow-host name,…] [-token t | -no-auth] [-no-auto-update] [repository path]\n       %s -update | -version\n\n", os.Args[0], os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("gitreview", buildVersion())
 		return nil
+	}
+	if *doUpdate {
+		return updateNow()
 	}
 
 	dir := "."
@@ -81,7 +87,7 @@ func run() error {
 	} else if *token == "" {
 		*token = server.NewToken()
 	}
-	srv, err := server.New(repo, web, server.Options{AllowHosts: allowedHosts(*allow), Token: *token})
+	srv, err := server.New(repo, web, server.Options{AllowHosts: allowedHosts(*allow), Token: *token, Version: buildVersion()})
 	if err != nil {
 		return err
 	}
@@ -100,6 +106,9 @@ func run() error {
 	}
 	if *token == "" {
 		fmt.Println("  ! authentication disabled (-no-auth)")
+	}
+	if !*noAutoUpdate && os.Getenv("GITREVIEW_NO_AUTO_UPDATE") == "" && update.Release(buildVersion()) {
+		go autoUpdate(srv, *token)
 	}
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	return hs.Serve(ln)

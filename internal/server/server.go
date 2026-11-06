@@ -33,6 +33,7 @@ type Server struct {
 	web        fs.FS
 	allowHosts map[string]bool
 	auth       *tokenAuth // nil = no authentication
+	version    string
 	watch      *watcher
 	fetching   sync.Mutex // one fetch at a time
 }
@@ -45,6 +46,9 @@ type Options struct {
 	// Token is the access token required on every request; "" disables
 	// authentication.
 	Token string
+	// Version is shown in the UI; a change seen after reconnecting makes
+	// open pages reload.
+	Version string
 }
 
 // New creates a server for repo; web holds index.html and assets.
@@ -57,7 +61,7 @@ func New(repo *git.Repo, web fs.FS, opts Options) (*Server, error) {
 	for _, h := range opts.AllowHosts {
 		hosts[strings.ToLower(h)] = true
 	}
-	return &Server{repo: repo, store: review.NewStore(dir), web: web, allowHosts: hosts, auth: newTokenAuth(opts.Token), watch: newWatcher(repo)}, nil
+	return &Server{repo: repo, store: review.NewStore(dir), web: web, allowHosts: hosts, auth: newTokenAuth(opts.Token), version: opts.Version, watch: newWatcher(repo)}, nil
 }
 
 // Handler returns the HTTP handler.
@@ -276,6 +280,7 @@ func (s *Server) info(*http.Request) (any, error) {
 		bases = append(bases, b)
 	}
 	return map[string]any{
+		"version":  s.version,
 		"root":     s.repo.Root,
 		"name":     filepath.Base(s.repo.Root),
 		"head":     s.repo.Head(),
@@ -391,7 +396,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
-	fmt.Fprint(w, "retry: 2000\nevent: hello\ndata: {}\n\n")
+	hello, _ := json.Marshal(map[string]string{"version": s.version})
+	fmt.Fprintf(w, "retry: 2000\nevent: hello\ndata: %s\n\n", hello)
 	flusher.Flush()
 
 	keepalive := time.NewTicker(keepaliveInterval)
@@ -525,4 +531,15 @@ func (s *Server) fetch(r *http.Request) (any, error) {
 		updates = append(updates, u)
 	}
 	return map[string]any{"branches": updates}, nil
+}
+
+// PrepareRestart waits for a running fetch to finish and blocks new ones, so
+// the process can be replaced without interrupting a git write.
+func (s *Server) PrepareRestart() {
+	s.fetching.Lock()
+}
+
+// AbortRestart undoes PrepareRestart when the restart failed.
+func (s *Server) AbortRestart() {
+	s.fetching.Unlock()
 }

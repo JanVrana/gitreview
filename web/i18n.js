@@ -88,6 +88,7 @@ const I18N = {
     ffDiverged: (b, a, up) => `${b}: has ${a} local ${a === 1 ? 'commit' : 'commits'}, not updated – compare against ${up}`,
     ffCheckedout: b => `${b}: checked out, not updated – use git pull`,
     nothingToUpdate: 'No local base branches to update.',
+    updatedReload: v => `gitreview was updated to ${v} – the page reloads after you finish the comment`,
     // navigation, live
     lastChange: 'Last change of the last file',
     firstChange: 'First change of the first file',
@@ -173,6 +174,7 @@ const I18N = {
     ffDiverged: (b, a, up) => `${b}: má ${a} lokálních commitů, neaktualizováno – porovnej proti ${up}`,
     ffCheckedout: b => `${b}: je checkoutnutá, neaktualizováno – použij git pull`,
     nothingToUpdate: 'Žádné lokální base větve k aktualizaci.',
+    updatedReload: v => `gitreview se aktualizoval na ${v} – stránka se znovu načte, až dokončíš komentář`,
     lastChange: 'Poslední změna posledního souboru',
     firstChange: 'První změna prvního souboru',
     liveOn: 'Auto-refresh: připojeno',

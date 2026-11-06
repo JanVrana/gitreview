@@ -104,6 +104,7 @@ button.danger { color: var(--c-stale); }
 }
 #settings-menu[hidden] { display: none; }
 #settings-menu label { justify-content: space-between; gap: 12px; }
+.app-version { color: var(--fg-dim); font-size: 11px; border-top: 1px solid var(--border); padding-top: 8px; }
 #live { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-dim); }
 #live.on { background: #5fb760; }
 #live.flash { box-shadow: 0 0 0 4px rgba(95,183,96,.35); }

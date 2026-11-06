@@ -64,7 +64,7 @@ source ~/.bashrc && gitreview -version
 
 From source: `git clone https://github.com/JanVrana/gitreview && cd gitreview && make build`.
 
-To update, run the same command again.
+gitreview **updates itself** (see [Automatic updates](#automatic-updates)); `gitreview -update` updates right away. Running the install command again works too.
 
 ## Usage
 
@@ -82,6 +82,8 @@ On startup it prints the URLs it is reachable on (the machine's IP addresses), e
 | `-allow-host` | extra host names accepted in the `Host` header, comma separated |
 | `-token` | fixed access token instead of a random one (also `GITREVIEW_TOKEN`); keeps bookmarks working across restarts |
 | `-no-auth` | no access token: anyone who can reach the port can use the UI |
+| `-no-auto-update` | do not install new releases automatically (also `GITREVIEW_NO_AUTO_UPDATE=1`) |
+| `-update` | install the latest release now and exit |
 | `-version` | print the version and exit |
 
 ### Review loop with an AI agent
@@ -91,6 +93,20 @@ On startup it prints the URLs it is reachable on (the machine's IP addresses), e
 3. Click **Export REVIEW.md**. This writes all comments with code snippets to `REVIEW.md` in the repository root. **Copy** copies the same text to the clipboard instead.
 4. Tell the agent: *"address the comments in REVIEW.md"*.
 5. The page refreshes by itself as the agent edits files. Comments whose line has changed are marked as stale.
+
+## Automatic updates
+
+A running gitreview checks GitHub for a new release 30 seconds after start and then every 6 hours. When one is available it:
+
+1. downloads the binary for your platform and verifies it against the release's `SHA256SUMS`,
+2. replaces its own executable (atomically, in the same directory),
+3. restarts in place with the same arguments, port and access token.
+
+Open pages reconnect and reload into the new version by themselves. If you are typing a comment, the reload waits until you save or cancel it.
+
+- Development builds (`make build` from a working copy, version `dev` or `v…-dirty`) never update themselves.
+- The directory with the binary must be writable by the user running gitreview (true for `~/.local/bin` and `~/go/bin`; not for `/usr/local/bin` installed with `sudo`). Otherwise the update is skipped and the reason is logged.
+- Turn it off with `-no-auto-update` or `GITREVIEW_NO_AUTO_UPDATE=1`.
 
 ## Security
 

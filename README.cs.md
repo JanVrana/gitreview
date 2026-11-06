@@ -62,7 +62,7 @@ source ~/.bashrc && gitreview -version
 
 Ze zdrojáků: `git clone https://github.com/JanVrana/gitreview && cd gitreview && make build`.
 
-Aktualizace = znovu spustit stejný příkaz.
+gitreview se **aktualizuje sám** (viz [Automatické aktualizace](#automatické-aktualizace)); `gitreview -update` aktualizuje hned. Funguje i znovu spustit instalační příkaz.
 
 ## Spuštění
 
@@ -82,6 +82,8 @@ Při startu se vypíšou URL (IP adresy VM) i s přístupovým tokenem, např. `
 | `-allow-host` | další povolená jména v hlavičce `Host`, oddělená čárkou |
 | `-token` | pevný přístupový token místo náhodného (také `GITREVIEW_TOKEN`); záložky pak fungují i po restartu |
 | `-no-auth` | bez tokenu: UI může používat každý, kdo se dostane na port |
+| `-no-auto-update` | neinstalovat nové verze automaticky (také `GITREVIEW_NO_AUTO_UPDATE=1`) |
+| `-update` | hned nainstaluje poslední verzi a skončí |
 | `-version` | vypíše verzi a skončí |
 
 **Bezpečnost:** každý požadavek potřebuje **přístupový token**. Ve výchozím stavu se při každém startu vygeneruje náhodný a vypíše se v URL. Pevný nastavíš přes `-token` nebo `GITREVIEW_TOKEN` (raději proměnnou, argumenty jsou vidět v `ps`). Token se přijímá jako `?token=` (vymění se za HttpOnly cookie a z adresy zmizí), jako cookie, nebo pro skripty jako `Authorization: Bearer <token>`.
@@ -93,6 +95,20 @@ Další ochrany, aktivní i s `-no-auth`:
 - Přístup přes doménové jméno je kvůli DNS rebindingu povolený jen pro IP adresy, `localhost` a hostname stroje. Další jména povolíš přes `-allow-host vm.firma.cz,dev-vm`.
 - Číst lze jen soubory ze seznamu změn.
 - Pracovní kopie ani checkoutnuté větve se server nedotkne. Zapisuje jen `REVIEW.md`, `.git/gitreview/comments.json` a při **Fetch** remote-tracking větve a fast-forward lokálních base větví.
+
+## Automatické aktualizace
+
+Běžící gitreview 30 sekund po startu a pak každých 6 hodin zkontroluje, jestli na GitHubu není nový release. Když ano:
+
+1. stáhne binárku pro tvou platformu a ověří ji proti `SHA256SUMS` daného releasu,
+2. nahradí svůj spustitelný soubor (atomicky, ve stejném adresáři),
+3. restartuje se na místě se stejnými argumenty, portem i přístupovým tokenem.
+
+Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna píšeš komentář, počkají, až ho uložíš nebo zrušíš.
+
+- Vývojové buildy (`make build` z pracovní kopie, verze `dev` nebo `v…-dirty`) se samy neaktualizují.
+- Adresář s binárkou musí být zapisovatelný pro uživatele, pod kterým gitreview běží (platí pro `~/.local/bin` i `~/go/bin`, ne pro `/usr/local/bin` instalované přes `sudo`). Jinak se aktualizace přeskočí a důvod se vypíše do logu.
+- Vypnout jde přes `-no-auto-update` nebo `GITREVIEW_NO_AUTO_UPDATE=1`.
 
 ## Co umí
 

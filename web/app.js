@@ -574,13 +574,16 @@ async function latest(kind, fetcher) {
 }
 
 async function loadInfo() {
+  const prev = state.info && state.info.version;
   state.info = await api('/api/info');
+  if (prev && state.info.version && state.info.version !== prev) reloadWhenIdle(state.info.version);
   const valid = b => state.info.bases.some(x => x.exists && x.name === b) || state.info.branches.includes(b);
   if (!valid(state.opts.base)) {
     const first = state.info.bases.find(b => b.exists);
     state.opts.base = first ? first.name : (state.info.branches[0] || 'develop');
   }
   renderToolbar();
+  $('#app-version').textContent = 'gitreview ' + (state.info.version || '');
 }
 
 async function loadFiles() {
@@ -689,11 +692,29 @@ async function refresh() {
   setTimeout(() => live.classList.remove('flash'), 600);
 }
 
+/* Reload into an updated server, but never throw away a comment being typed. */
+let pendingReload = null;
+function reloadWhenIdle(version) {
+  if (state.editing && state.draft.trim()) {
+    if (!pendingReload) toast(t('updatedReload', version), false, 10000);
+    pendingReload = version;
+    return;
+  }
+  location.reload();
+}
+
 function connectEvents() {
   const live = $('#live');
   let first = true;
   const es = new EventSource('/api/events');
-  es.addEventListener('hello', () => {
+  es.addEventListener('hello', ev => {
+    let v = '';
+    try { v = JSON.parse(ev.data).version || ''; } catch { /* old server */ }
+    if (state.info && v && state.info.version && v !== state.info.version) {
+      es.close(); // the server was updated: load the new UI
+      reloadWhenIdle(v);
+      return;
+    }
     live.classList.add('on');
     live.title = t('liveOn');
     if (!first) scheduleRefresh(); // reconnected – we may have missed changes
@@ -903,12 +924,14 @@ async function saveComment() {
   } catch (e) { toast(e.message, true); return; }
   state.editing = null;
   state.draft = '';
+  if (pendingReload) { location.reload(); return; }
   await refreshComments();
 }
 
 function cancelEdit() {
   state.editing = null;
   state.draft = '';
+  if (pendingReload) { location.reload(); return; }
   renderDiff();
 }
 
