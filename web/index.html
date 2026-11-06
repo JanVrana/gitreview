@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,26 +11,42 @@
 <body>
 <header id="toolbar">
   <div class="repo"><span id="repo-name">…</span><span id="branch" class="branch"></span></div>
-  <label>Proti <select id="opt-base"></select></label>
-  <label title="Levá strana: společný předek větví (jako Pull Request), nebo aktuální špička base větve">Vlevo
+  <label><span data-i18n="against">Against</span> <select id="opt-base"></select></label>
+  <label data-i18n-title="leftTitle"><span data-i18n="left">Left</span>
     <select id="opt-left">
-      <option value="mergebase">merge-base (jako PR)</option>
-      <option value="tip">špička base větve</option>
+      <option value="mergebase" data-i18n="optMergebase">merge-base (like PR)</option>
+      <option value="tip" data-i18n="optTip">tip of base branch</option>
     </select>
   </label>
-  <label title="Pravá strana: pracovní kopie včetně necommitnutých a nových souborů, nebo jen commity">Vpravo
+  <label data-i18n-title="rightTitle"><span data-i18n="right">Right</span>
     <select id="opt-right">
-      <option value="worktree">pracovní kopie</option>
-      <option value="head">HEAD (jen commity)</option>
+      <option value="worktree" data-i18n="optWorktree">working tree</option>
+      <option value="head" data-i18n="optHead">HEAD (commits only)</option>
     </select>
   </label>
-  <label class="chk"><input type="checkbox" id="opt-ws"> Ignorovat mezery</label>
+  <label class="chk"><input type="checkbox" id="opt-ws"> <span data-i18n="ignoreWs">Ignore whitespace</span></label>
   <span class="spacer"></span>
-  <button id="btn-comments" title="Seznam komentářů">Komentáře <span id="comment-count" class="badge">0</span></button>
-  <button id="btn-export" title="Zapsat komentáře do REVIEW.md v kořeni repozitáře">Export REVIEW.md</button>
-  <button id="btn-copy" title="Zkopírovat komentáře jako prompt pro Claude">Kopírovat</button>
-  <button id="btn-theme" title="Přepnout světlé/tmavé téma">Téma</button>
-  <span id="live" title="Auto-refresh"></span>
+  <button id="btn-comments" data-i18n-title="commentsTitle"><span data-i18n="comments">Comments</span> <span id="comment-count" class="badge">0</span></button>
+  <button id="btn-export" data-i18n-title="exportTitle">Export REVIEW.md</button>
+  <button id="btn-copy" data-i18n-title="copyTitle" data-i18n="copy">Copy</button>
+  <div class="settings">
+    <button id="btn-settings" data-i18n-title="settings" aria-haspopup="true" aria-expanded="false">⚙</button>
+    <div id="settings-menu" hidden>
+      <label><span data-i18n="theme">Theme</span>
+        <select id="set-theme">
+          <option value="dark" data-i18n="themeDark">Dark</option>
+          <option value="light" data-i18n="themeLight">Light</option>
+        </select>
+      </label>
+      <label><span data-i18n="language">Language</span>
+        <select id="set-lang">
+          <option value="en">English</option>
+          <option value="cs">Čeština</option>
+        </select>
+      </label>
+    </div>
+  </div>
+  <span id="live"></span>
 </header>
 <div id="main">
   <aside id="sidebar">
@@ -41,7 +57,7 @@
   <section id="content">
     <div id="diff-header"></div>
     <div id="diff-wrap">
-      <div id="diff-scroll"><div class="msg">Načítám…</div></div>
+      <div id="diff-scroll"><div class="msg" data-i18n="loading">Loading…</div></div>
       <div id="ruler"></div>
     </div>
     <div id="hscroll" class="cols">
@@ -55,6 +71,7 @@
 <div id="comments-panel" hidden></div>
 <div id="toast" hidden></div>
 <span id="measure" class="mono" aria-hidden="true">xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

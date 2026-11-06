@@ -74,7 +74,10 @@ function fmtSize(n) {
   return n > 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : Math.round(n / 1024) + ' kB';
 }
 
-const STATUS = { M: 'změněn', A: 'přidán', D: 'smazán', R: 'přejmenován', U: 'nový (nesledovaný)', T: 'změna typu' };
+const statusName = st => t('st')[st] || st;
+
+/* Label of one comparison side; the working tree gets a translated suffix. */
+const sideLabel = sd => sd.rev ? sd.label : `${sd.label} – ${t('worktree')}`;
 
 // ---- syntax highlighting (language comes from the server, internal/lang) --------
 /* Split highlighted HTML into per-line HTML, closing and reopening spans that
@@ -333,7 +336,7 @@ function cellsHtml(side, idx) {
 function rowHtml(row) {
   if (row.kind === 'fold') {
     return `<tr class="fold" data-block="${row.block}"><td class="num"></td>` +
-      `<td class="code" colspan="4">⋯ ${row.count} nezměněných řádků – klikni pro zobrazení</td></tr>`;
+      `<td class="code" colspan="4">${t('folded', row.count)}</td></tr>`;
   }
   let cls = 'k-' + row.kind;
   if (row.first) cls += ' first';
@@ -344,22 +347,22 @@ function rowHtml(row) {
 
 function commentBoxHtml(c) {
   const ed = state.editing;
-  if (ed && ed.id === c.id) return editorHtml('Uložit změny');
-  const when = new Date(c.created).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' });
+  if (ed && ed.id === c.id) return editorHtml(t('saveChanges'));
+  const when = new Date(c.created).toLocaleString(t('locale'), { dateStyle: 'short', timeStyle: 'short' });
   const stale = c.stale
-    ? `<span class="stale-badge" title="Řádek se od napsání komentáře změnil. Původně: ${esc(c.lineText)}">zastaralý</span>`
+    ? `<span class="stale-badge" title="${esc(t('staleTitle', c.lineText))}">${t('stale')}</span>`
     : '';
-  const side = c.side === 'left' ? 'původní' : 'nová';
+  const side = c.side === 'left' ? t('sideOld') : t('sideNew');
   return `<div class="cbox${c.stale ? ' stale' : ''}" data-id="${c.id}">` +
-    `<div class="ch"><span>${side} verze · řádek ${c.line} · ${esc(when)}</span>${stale}<span class="sp"></span>` +
-    `<button data-act="edit">Upravit</button><button data-act="delete" class="danger">Smazat</button></div>` +
+    `<div class="ch"><span>${side} · ${t('line')} ${c.line} · ${esc(when)}</span>${stale}<span class="sp"></span>` +
+    `<button data-act="edit">${t('edit')}</button><button data-act="delete" class="danger">${t('delete')}</button></div>` +
     `<div class="ct">${esc(c.text)}</div></div>`;
 }
 
-function editorHtml(label = 'Přidat komentář') {
-  return `<div class="ceditor"><textarea id="ctext" placeholder="Komentář pro Claude…"></textarea>` +
+function editorHtml(label = t('addComment')) {
+  return `<div class="ceditor"><textarea id="ctext" placeholder="${t('placeholder')}"></textarea>` +
     `<div class="cbtns"><button class="primary" data-act="save">${label}</button>` +
-    `<button data-act="cancel">Zrušit</button><span class="hint">Ctrl+Enter uloží · Esc zruší</span></div></div>`;
+    `<button data-act="cancel">${t('cancel')}</button><span class="hint">${t('editorHint')}</span></div></div>`;
 }
 
 function commentRowHtml(row, cm) {
@@ -379,7 +382,7 @@ function commentRowHtml(row, cm) {
 /* Comments of the open file that cannot be anchored to a visible line. */
 function orphansHtml(orphans) {
   if (!orphans.length) return '';
-  return `<div class="orphans"><div class="orphans-head">Komentáře k řádkům, které se teď nezobrazují</div>` +
+  return `<div class="orphans"><div class="orphans-head">${t('orphans')}</div>` +
     orphans.map(commentBoxHtml).join('') + '</div>';
 }
 
@@ -399,10 +402,10 @@ function bindEditor() {
 }
 
 function emptyDiffMessage(d) {
-  if (d.file.status === 'R') return `Soubor byl jen přejmenován z <b>${esc(d.file.oldPath)}</b>, obsah je beze změny.`;
-  if (!d.left.lines.length && !d.right.lines.length) return 'Soubor je prázdný.';
-  if (state.opts.ws) return 'Soubor se liší jen v bílých znacích (zapnuto „Ignorovat mezery“).';
-  return 'Obsah souboru se neliší (změna oprávnění nebo typu).';
+  if (d.file.status === 'R') return t('renamedOnly', esc(d.file.oldPath));
+  if (!d.left.lines.length && !d.right.lines.length) return t('emptyFile');
+  if (state.opts.ws) return t('wsOnly');
+  return t('sameContent');
 }
 
 function renderHeader() {
@@ -413,13 +416,13 @@ function renderHeader() {
   const old = f.oldPath ? `<span class="old">← ${esc(f.oldPath)}</span>` : '';
   let sides = '';
   if (d && d.left && d.right) {
-    const l = d.left.exists ? `<b>${esc(d.left.label)}</b>` : `${esc(d.left.label)} – soubor neexistuje`;
-    const r = d.right.exists ? `<b>${esc(d.right.label)}</b>` : `${esc(d.right.label)} – soubor neexistuje`;
+    const lbl = sd => sd.exists ? `<b>${esc(sideLabel(sd))}</b>` : `${esc(sideLabel(sd))} – ${t('fileMissing')}`;
+    const l = lbl(d.left), r = lbl(d.right);
     sides = `<div class="dh-sides cols" id="dh-sides"><div class="pad-num"></div><div class="side">${l}</div>` +
       `<div class="pad-mid"></div><div class="side">${r}</div></div>`;
   }
-  h.innerHTML = `<div class="dh-path"><span class="st st-${f.status}">${STATUS[f.status] || f.status}</span>` +
-    `<span>${esc(f.path)}</span>${old}<span class="hint">F7 / Shift+F7 změny · Alt+↓/↑ soubory · klik na číslo řádku = komentář</span></div>${sides}`;
+  h.innerHTML = `<div class="dh-path"><span class="st st-${f.status}">${statusName(f.status)}</span>` +
+    `<span>${esc(f.path)}</span>${old}<span class="hint">${t('hint')}</span></div>${sides}`;
 }
 
 function renderDiff({ keepScroll = true } = {}) {
@@ -430,9 +433,9 @@ function renderDiff({ keepScroll = true } = {}) {
   if (!d) return;
   const cm = fileComments();
   const extra = orphansHtml(cm.orphans);
-  if (d.binary) { renderMessage('Binární soubor – náhled není k dispozici.', extra); return; }
+  if (d.binary) { renderMessage(t('binary'), extra); return; }
   if (d.tooLarge) {
-    renderMessage(`Soubor je velký (${fmtSize(d.size)}).<br><button id="btn-force">Zobrazit i tak</button>`, extra);
+    renderMessage(`${t('tooLarge', fmtSize(d.size))}<br><button id="btn-force">${t('showAnyway')}</button>`, extra);
     $('#btn-force').onclick = () => { state.forced = state.current; openFile(state.current); };
     return;
   }
@@ -545,7 +548,7 @@ function gotoChange(dir) {
 function gotoFile(dir, landOn) {
   const i = state.order.indexOf(state.current);
   const next = state.order[i + dir];
-  if (!next) { toast(dir > 0 ? 'Poslední změna posledního souboru' : 'První změna prvního souboru'); return; }
+  if (!next) { toast(dir > 0 ? t('lastChange') : t('firstChange')); return; }
   openFile(next, { landOn: landOn || 'first' });
 }
 
@@ -677,7 +680,7 @@ async function refresh() {
   } else if (state.current) {
     state.diff = null;
     renderHeader();
-    renderMessage('Soubor už není mezi změnami.');
+    renderMessage(t('notInChanges'));
   } else if (state.order.length) {
     openFile(state.order[0]);
   }
@@ -692,14 +695,14 @@ function connectEvents() {
   const es = new EventSource('/api/events');
   es.addEventListener('hello', () => {
     live.classList.add('on');
-    live.title = 'Auto-refresh: připojeno';
+    live.title = t('liveOn');
     if (!first) scheduleRefresh(); // reconnected – we may have missed changes
     first = false;
   });
   es.addEventListener('changed', scheduleRefresh);
   es.onerror = () => {
     live.classList.remove('on');
-    live.title = 'Auto-refresh: odpojeno, zkouším znovu…';
+    live.title = t('liveOff');
   };
 }
 
@@ -715,10 +718,10 @@ function renderToolbar() {
   const sel = $('#opt-base');
   const main = info.bases.map(b =>
     `<option value="${esc(b.name)}"${b.exists ? '' : ' disabled'}>${esc(b.name)}` +
-    `${b.exists ? (b.ref !== b.name ? ` (${esc(b.ref)})` : '') : ' – neexistuje'}</option>`).join('');
+    `${b.exists ? (b.ref !== b.name ? ` (${esc(b.ref)})` : '') : ` – ${t('notExists')}`}</option>`).join('');
   const others = info.branches.filter(b => !info.bases.some(x => x.name === b || x.ref === b));
   sel.innerHTML = main + (others.length
-    ? `<optgroup label="Ostatní větve">${others.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`
+    ? `<optgroup label="${t('otherBranches')}">${others.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`
     : '');
   sel.value = state.opts.base;
   $('#opt-left').value = state.opts.left;
@@ -758,13 +761,13 @@ function renderSidebar() {
     state.order = [];
     return;
   }
-  if (!c) { sum.textContent = 'Načítám…'; return; }
+  if (!c) { sum.textContent = t('loading'); return; }
   const add = state.files.reduce((a, f) => a + f.added, 0);
   const del = state.files.reduce((a, f) => a + f.deleted, 0);
-  sum.innerHTML = `<b>${state.files.length}</b> souborů · <span class="stat"><span class="a">+${add}</span> <span class="d">−${del}</span></span>` +
-    `<span class="lbl" title="${esc(c.left.label)}">◀ ${esc(c.left.label)}</span>` +
-    `<span class="lbl" title="${esc(c.right.label)}">▶ ${esc(c.right.label)}</span>` +
-    (c.onBase ? `<span class="lbl err">Jsi přímo na větvi ${esc(c.base)}.</span>` : '');
+  sum.innerHTML = `<b>${state.files.length}</b> ${t('files', state.files.length)} · <span class="stat"><span class="a">+${add}</span> <span class="d">−${del}</span></span>` +
+    `<span class="lbl" title="${esc(sideLabel(c.left))}">◀ ${esc(sideLabel(c.left))}</span>` +
+    `<span class="lbl" title="${esc(sideLabel(c.right))}">▶ ${esc(sideLabel(c.right))}</span>` +
+    (c.onBase ? `<span class="lbl err">${esc(t('onBase', c.base))}</span>` : '');
 
   const viewed = viewedMap();
   const counts = {};
@@ -777,12 +780,12 @@ function renderSidebar() {
     const cls = `tnode tfile st-${f.status}${f.path === state.current ? ' active' : ''}${isViewed ? ' viewed' : ''}`;
     const stat = f.binary ? '<span class="stat">bin</span>'
       : `<span class="stat"><span class="a">+${f.added}</span> <span class="d">−${f.deleted}</span></span>`;
-    return `<div class="${cls}" data-path="${esc(f.path)}" style="padding-left:${8 + depth * 14}px" title="${esc(f.path)} – ${STATUS[f.status] || f.status}">` +
-      `<input type="checkbox" class="viewed-chk" title="Zkontrolováno"${isViewed ? ' checked' : ''}>` +
+    return `<div class="${cls}" data-path="${esc(f.path)}" style="padding-left:${8 + depth * 14}px" title="${esc(f.path)} – ${statusName(f.status)}">` +
+      `<input type="checkbox" class="viewed-chk" title="${t('reviewed')}"${isViewed ? ' checked' : ''}>` +
       `<span class="name">${esc(name)}</span>` +
       (f.oldPath ? `<span class="old">← ${esc(f.oldPath.split('/').pop())}</span>` : '') +
-      (changed ? '<span class="dot" title="Změněno od posledního zobrazení">●</span>' : '') +
-      (counts[f.path] ? `<span class="cc" title="Komentáře">✎${counts[f.path]}</span>` : '') +
+      (changed ? `<span class="dot" title="${t('changedSince')}">●</span>` : '') +
+      (counts[f.path] ? `<span class="cc" title="${t('comments')}">✎${counts[f.path]}</span>` : '') +
       stat + '</div>';
   };
   // one sorted traversal: always records the order, emits HTML only when visible
@@ -809,7 +812,7 @@ function renderSidebar() {
     return h;
   };
   const html = walk(buildTree(state.files), '', 0, true);
-  tree.innerHTML = html || `<div class="msg">${c.onBase ? 'Žádné změny – jsi na base větvi.' : 'Žádné změny.'}</div>`;
+  tree.innerHTML = html || `<div class="msg">${c.onBase ? t('noChangesOnBase') : t('noChanges')}</div>`;
   state.order = order;
 }
 
@@ -818,16 +821,16 @@ let confirmClear = false;
 function renderCommentsPanel() {
   const p = $('#comments-panel');
   const cs = state.comments;
-  let h = `<div class="cp-head"><b>Komentáře (${cs.length})</b>` +
-    `<button data-act="export">Export REVIEW.md</button><button data-act="copy">Kopírovat</button>` +
-    `<button data-act="clear" class="danger">${confirmClear ? 'Opravdu smazat vše?' : 'Smazat vše'}</button>` +
+  let h = `<div class="cp-head"><b>${t('comments')} (${cs.length})</b>` +
+    `<button data-act="export">Export REVIEW.md</button><button data-act="copy">${t('copy')}</button>` +
+    `<button data-act="clear" class="danger">${confirmClear ? t('clearConfirm') : t('clearAll')}</button>` +
     `<button data-act="close">✕</button></div>`;
-  if (!cs.length) h += '<div class="empty">Zatím žádné komentáře. Klikni na číslo řádku v diffu.</div>';
+  if (!cs.length) h += `<div class="empty">${t('noComments')}</div>`;
   let file = null;
   for (const c of cs) {
     if (c.file !== file) { file = c.file; h += `<div class="cp-file">${esc(file)}</div>`; }
     h += `<div class="cp-item" data-file="${esc(c.file)}" data-side="${c.side}" data-line="${c.line}">` +
-      `<div class="ln">${c.side === 'left' ? 'původní' : 'nová'} verze · řádek ${c.line}</div>` +
+      `<div class="ln">${c.side === 'left' ? t('sideOld') : t('sideNew')} · ${t('line')} ${c.line}</div>` +
       `<div class="tx">${esc(c.text)}</div></div>`;
   }
   p.innerHTML = h;
@@ -844,7 +847,7 @@ function startComment(side, line) {
 async function saveComment() {
   const ed = state.editing;
   const text = state.draft.trim();
-  if (!ed || !text) { toast('Komentář je prázdný', true); return; }
+  if (!ed || !text) { toast(t('emptyComment'), true); return; }
   try {
     if (ed.id) {
       await api('/api/comments', { method: 'PUT', json: { id: ed.id, text } });
@@ -888,32 +891,47 @@ function copyText(text) {
   ta.select();
   const ok = document.execCommand('copy');
   ta.remove();
-  return ok ? Promise.resolve() : Promise.reject(new Error('Kopírování do schránky selhalo'));
+  return ok ? Promise.resolve() : Promise.reject(new Error(t('copyFailed')));
 }
 
 async function exportReview(write) {
-  if (!state.comments.length) { toast('Žádné komentáře k exportu'); return; }
+  if (!state.comments.length) { toast(t('nothingToExport')); return; }
   const c = state.compare;
   let r;
   try {
     r = await api('/api/export', {
       method: 'POST',
-      json: { write, left: c ? c.left.label : '', right: c ? c.right.label : '' },
+      json: { write, lang: uiLang, left: c ? sideLabel(c.left) : '', right: c ? sideLabel(c.right) : '' },
     });
   } catch (e) { toast(e.message, true); return; }
   if (write) {
-    toast(`Zapsáno ${r.count} připomínek do ${r.path} – v Claude napiš „zapracuj REVIEW.md“`);
+    toast(t('written', r.count, r.path));
   } else {
-    try { await copyText(r.markdown); toast(`Zkopírováno ${r.count} připomínek do schránky`); }
+    try { await copyText(r.markdown); toast(t('copied', r.count)); }
     catch (e) { toast(e.message, true); }
   }
 }
 
 const EXPORT_ACTIONS = { export: () => exportReview(true), copy: () => exportReview(false) };
 
-function applyTheme(t) {
-  document.documentElement.dataset.theme = t;
-  LS.set('theme', t);
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $('#set-theme').value = theme;
+  LS.set('theme', theme);
+}
+
+/* Switches the UI language and redraws everything that holds text. */
+function applyLang(l) {
+  uiLang = I18N[l] ? l : 'en';
+  $('#set-lang').value = uiLang;
+  LS.set('lang', uiLang);
+  applyStaticTexts();
+  const live = $('#live');
+  live.title = t(live.classList.contains('on') ? 'liveOn' : 'liveOff');
+  if (state.info) renderToolbar();
+  renderSidebar();
+  if (state.diff) renderDiff();
+  if (!$('#comments-panel').hidden) renderCommentsPanel();
 }
 
 async function changeOpts() {
@@ -926,13 +944,18 @@ async function changeOpts() {
   await loadFiles();
   const target = state.files.some(f => f.path === state.current) ? state.current : state.order[0];
   if (target) openFile(target);
-  else { state.current = null; state.diff = null; renderHeader(); renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : 'Žádné změny.'); }
+  else { state.current = null; state.diff = null; renderHeader(); renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : t('noChanges')); }
 }
 
 // ---- events ----------------------------------------------------------------------------------------
 function bindUI() {
   ['#opt-base', '#opt-left', '#opt-right', '#opt-ws'].forEach(s => $(s).addEventListener('change', changeOpts));
-  $('#btn-theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+  const menu = $('#settings-menu'), gear = $('#btn-settings');
+  const showMenu = open => { menu.hidden = !open; gear.setAttribute('aria-expanded', String(open)); };
+  gear.onclick = e => { e.stopPropagation(); showMenu(menu.hidden); };
+  document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.settings')) showMenu(false); });
+  $('#set-theme').addEventListener('change', e => applyTheme(e.target.value));
+  $('#set-lang').addEventListener('change', e => applyLang(e.target.value));
   $('#btn-export').onclick = EXPORT_ACTIONS.export;
   $('#btn-copy').onclick = EXPORT_ACTIONS.copy;
   $('#btn-comments').onclick = () => {
@@ -959,7 +982,7 @@ function bindUI() {
     const item = e.target.closest('.cp-item');
     if (item) {
       const { file, side, line } = item.dataset;
-      if (!state.files.some(f => f.path === file)) { toast('Soubor není v aktuálním porovnání', true); return; }
+      if (!state.files.some(f => f.path === file)) { toast(t('fileNotCompared'), true); return; }
       if (file === state.current) scrollToLine(side, +line);
       else openFile(file, { line: { side, line: +line } });
     }
@@ -1036,7 +1059,8 @@ function bindUI() {
   document.addEventListener('keydown', e => {
     const typing = /^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName) && e.target.type !== 'checkbox';
     if (e.key === 'Escape') {
-      if (!$('#comments-panel').hidden) $('#comments-panel').hidden = true;
+      if (!$('#settings-menu').hidden) $('#settings-menu').hidden = true;
+      else if (!$('#comments-panel').hidden) $('#comments-panel').hidden = true;
       else if (state.editing) cancelEdit();
       return;
     }
@@ -1071,6 +1095,9 @@ function bindUI() {
 // ---- start ---------------------------------------------------------------------------------------------
 async function init() {
   applyTheme(LS.get('theme', 'dark'));
+  uiLang = I18N[LS.get('lang', '')] ? LS.get('lang', '') : defaultLang();
+  $('#set-lang').value = uiLang;
+  applyStaticTexts();
   const sw = LS.get('sidebarW', null);
   if (sw) document.body.style.setProperty('--sidebar-w', sw);
   measureChar();
@@ -1085,7 +1112,7 @@ async function init() {
   const last = LS.get('file:' + state.info.root, null);
   const first = state.files.some(f => f.path === last) ? last : state.order[0];
   if (first) openFile(first);
-  else renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : 'Žádné změny oproti zvolené větvi.');
+  else renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : t('noChangesVsBase'));
   connectEvents();
 }
 

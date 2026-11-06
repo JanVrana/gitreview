@@ -80,18 +80,18 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		if !s.hostAllowed(r.Host) {
-			http.Error(w, "nepovolený Host – přidej ho přes -allow-host", http.StatusForbidden)
+			http.Error(w, "host not allowed – add it with -allow-host", http.StatusForbidden)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			ct := strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])
 			if !strings.EqualFold(ct, "application/json") {
-				http.Error(w, "vyžadován Content-Type: application/json", http.StatusUnsupportedMediaType)
+				http.Error(w, "Content-Type: application/json required", http.StatusUnsupportedMediaType)
 				return
 			}
 			if o := r.Header.Get("Origin"); o != "" {
 				if u, err := url.Parse(o); err != nil || !strings.EqualFold(u.Host, r.Host) {
-					http.Error(w, "cizí Origin", http.StatusForbidden)
+					http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 					return
 				}
 			}
@@ -185,7 +185,7 @@ func (s *Server) resolve(r *http.Request) (*compare, error) {
 	}
 	head := s.repo.Head()
 	if head.Sha == "" {
-		return nil, badRequest(errors.New("repozitář nemá žádný commit"))
+		return nil, badRequest(errors.New("the repository has no commits"))
 	}
 	c := &compare{Base: base, IgnoreW: q.Get("ws") == "1", OnBase: baseSha == head.Sha}
 
@@ -205,7 +205,7 @@ func (s *Server) resolve(r *http.Request) (*compare, error) {
 	if q.Get("right") == "head" {
 		c.Right = side{Rev: head.Sha, Label: fmt.Sprintf("%s @ %s", headName, git.ShortSha(head.Sha))}
 	} else {
-		c.Right = side{Label: headName + " – pracovní kopie"}
+		c.Right = side{Label: headName} // the UI appends a translated "working tree"
 	}
 	return c, nil
 }
@@ -299,7 +299,7 @@ func (s *Server) diff(r *http.Request) (any, error) {
 		}
 	}
 	if fc == nil {
-		return nil, httpError{http.StatusNotFound, fmt.Errorf("soubor %q není mezi změněnými", path)}
+		return nil, httpError{http.StatusNotFound, fmt.Errorf("file %q is not among the changed files", path)}
 	}
 	resp := map[string]any{"file": fc, "compare": c, "lang": lang.ForPath(fc.Path)}
 	if fc.Binary {
@@ -351,7 +351,7 @@ func (s *Server) diff(r *http.Request) (any, error) {
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming nepodporován", http.StatusInternalServerError)
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 	ch, unsubscribe := s.watch.subscribe()
@@ -420,6 +420,7 @@ func (s *Server) commentDelete(r *http.Request) (any, error) {
 func (s *Server) export(r *http.Request) (any, error) {
 	var body struct {
 		Left, Right string
+		Lang        string
 		Write       bool
 	}
 	if err := decode(r, &body); err != nil {
@@ -430,7 +431,7 @@ func (s *Server) export(r *http.Request) (any, error) {
 		return nil, err
 	}
 	md := review.Markdown(cs, review.ExportInfo{
-		Branch: s.repo.Head().Branch, LeftDesc: oneLine(body.Left), RightDesc: oneLine(body.Right),
+		Branch: s.repo.Head().Branch, LeftDesc: oneLine(body.Left), RightDesc: oneLine(body.Right), Lang: body.Lang,
 	})
 	resp := map[string]any{"markdown": md, "count": len(cs)}
 	if body.Write {

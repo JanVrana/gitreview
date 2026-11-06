@@ -43,7 +43,7 @@ func Open(path string) (*Repo, error) {
 	r := &Repo{Root: abs}
 	out, err := r.run("rev-parse", "--show-toplevel")
 	if err != nil {
-		return nil, fmt.Errorf("%s není git repozitář: %w", abs, err)
+		return nil, fmt.Errorf("%s is not a git repository: %w", abs, err)
 	}
 	r.Root = strings.TrimSpace(string(out))
 	return r, nil
@@ -83,7 +83,7 @@ func ValidRef(s string) bool {
 // Verify resolves a revision to a full commit sha.
 func (r *Repo) Verify(ref string) (string, error) {
 	if !ValidRef(ref) {
-		return "", fmt.Errorf("neplatný ref %q", ref)
+		return "", fmt.Errorf("invalid ref %q", ref)
 	}
 	out, err := r.run("rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
 	if err != nil {
@@ -117,7 +117,7 @@ func (r *Repo) Head() Head {
 // It returns the ref name actually used.
 func (r *Repo) ResolveBase(name string) (string, error) {
 	if !ValidRef(name) {
-		return "", fmt.Errorf("neplatný ref %q", name)
+		return "", fmt.Errorf("invalid ref %q", name)
 	}
 	for _, cand := range []string{"refs/heads/" + name, "refs/remotes/origin/" + name} {
 		if _, err := r.run("rev-parse", "--verify", "--quiet", cand); err == nil {
@@ -127,7 +127,7 @@ func (r *Repo) ResolveBase(name string) (string, error) {
 	if _, err := r.Verify(name); err == nil {
 		return name, nil
 	}
-	return "", fmt.Errorf("větev %q neexistuje (ani origin/%s)", name, name)
+	return "", fmt.Errorf("branch %q does not exist (nor origin/%s)", name, name)
 }
 
 // Branches lists local and remote branch names.
@@ -149,7 +149,7 @@ func (r *Repo) Branches() []string {
 func (r *Repo) MergeBase(a, b string) (string, error) {
 	out, err := r.run("merge-base", a, b)
 	if err != nil {
-		return "", errors.New("větve nemají společného předka")
+		return "", errors.New("the branches have no common ancestor")
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -340,13 +340,13 @@ func SafePath(p string) bool {
 
 func (r *Repo) worktreePath(p string) (string, error) {
 	if !SafePath(p) {
-		return "", fmt.Errorf("neplatná cesta %q", p)
+		return "", fmt.Errorf("invalid path %q", p)
 	}
 	return filepath.Join(r.Root, filepath.FromSlash(p)), nil
 }
 
 // ErrNotExist is returned when a file does not exist in the requested revision.
-var ErrNotExist = errors.New("soubor v této revizi neexistuje")
+var ErrNotExist = errors.New("file does not exist in this revision")
 
 // Content returns a file's content at rev, or from the working tree when rev
 // is "". Symlinks are not followed; their target text is returned, which is
@@ -370,12 +370,12 @@ func (r *Repo) Content(rev, p string) ([]byte, error) {
 			return []byte(t), err
 		}
 		if !st.Mode().IsRegular() {
-			return nil, fmt.Errorf("%q není běžný soubor", p)
+			return nil, fmt.Errorf("%q is not a regular file", p)
 		}
 		return os.ReadFile(full)
 	}
 	if !SafePath(p) {
-		return nil, fmt.Errorf("neplatná cesta %q", p)
+		return nil, fmt.Errorf("invalid path %q", p)
 	}
 	if _, err := r.run("rev-parse", "--verify", "--quiet", rev+":"+p); err != nil {
 		return nil, ErrNotExist

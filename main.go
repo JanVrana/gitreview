@@ -38,18 +38,18 @@ func buildVersion() string {
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "Chyba:", err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }
 
 func run() error {
 	port := flag.Int("p", 8765, "port")
-	bind := flag.String("b", "0.0.0.0", "adresa, na které server poslouchá")
-	allow := flag.String("allow-host", "", "další povolené názvy hostitele oddělené čárkou (IP adresy, localhost a hostname stroje jsou povolené vždy)")
-	showVersion := flag.Bool("version", false, "vypíše verzi a skončí")
+	bind := flag.String("b", "0.0.0.0", "listen address")
+	allow := flag.String("allow-host", "", "extra allowed host names, comma separated (IP addresses, localhost and the machine hostname are always allowed)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Použití: %s [-p port] [-b adresa] [-allow-host jméno,…] [cesta k repozitáři]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [-b address] [-allow-host name,…] [repository path]\n\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()

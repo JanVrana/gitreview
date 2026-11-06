@@ -52,6 +52,12 @@ func TestMarkdownAndExport(t *testing.T) {
 		Text: "Přejmenuj proměnnou\nna něco popisného",
 	}}
 	md := Markdown(cs, ExportInfo{Branch: "feature/x", LeftDesc: "develop", RightDesc: "worktree"})
+	if !strings.Contains(md, "Please address") {
+		t.Errorf("default export should be English:\n%s", md)
+	}
+	if cs := Markdown(cs, ExportInfo{Lang: "cs"}); !strings.Contains(cs, "Zapracuj") || !strings.Contains(cs, "nová verze") {
+		t.Errorf("czech export:\n%s", cs)
+	}
 	for _, want := range []string{"`lib/x.pl:11`", ">>   11 | my $a = 1;", "````perl", "> na něco popisného", "feature/x"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q:\n%s", want, md)

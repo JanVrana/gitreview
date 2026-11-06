@@ -14,8 +14,6 @@ It was built for reviewing the work of AI coding agents such as Claude Code runn
 
 gitreview is a single Go binary with no dependencies besides `git`. The frontend is embedded and works offline, with no CDN.
 
-> The user interface is currently in Czech. The screenshots and the key bindings below show how to use it.
-
 ![Side-by-side diff in the dark theme with a review comment](docs/screenshots/diff-dark.png)
 
 <table>
@@ -68,7 +66,7 @@ On startup it prints the URLs it is reachable on (the machine's IP addresses). O
 
 1. Let the agent work on a branch.
 2. Open gitreview, go through the changed files and click a line number to leave a comment.
-3. Click **Export REVIEW.md**. This writes all comments with code snippets to `REVIEW.md` in the repository root. **Kopírovat** copies the same text to the clipboard instead.
+3. Click **Export REVIEW.md**. This writes all comments with code snippets to `REVIEW.md` in the repository root. **Copy** copies the same text to the clipboard instead.
 4. Tell the agent: *"address the comments in REVIEW.md"*.
 5. The page refreshes by itself as the agent edits files. Comments whose line has changed are marked as stale.
 
@@ -99,7 +97,7 @@ The server has **no authentication**. Run it on `0.0.0.0` only in a trusted netw
   - stored in `.git/gitreview/comments.json`,
   - `REVIEW.md` is added to `.git/info/exclude` automatically, so it never gets committed,
   - copying to the clipboard works over plain http too.
-- **Themes:** dark (Darcula) and light.
+- **Settings (⚙):** dark (Darcula) or light theme, English or Czech UI. The language defaults to your browser's; the exported `REVIEW.md` follows the UI language.
 
 ## Key bindings
 
