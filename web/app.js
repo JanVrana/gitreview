@@ -1196,6 +1196,7 @@ async function exportReview(write) {
 const EXPORT_ACTIONS = { export: () => exportReview(true), copy: () => exportReview(false) };
 
 function applyTheme(theme) {
+  if (![...$('#set-theme').options].some(o => o.value === theme)) theme = 'dark';
   document.documentElement.dataset.theme = theme;
   $('#set-theme').value = theme;
   LS.set('theme', theme);
