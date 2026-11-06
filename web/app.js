@@ -1,0 +1,1092 @@
+'use strict';
+/* gitreview – side-by-side review of the current branch. Vanilla JS, no build. */
+
+const $ = (s, el = document) => el.querySelector(s);
+const CTX = 4;        // unchanged lines shown around a change
+const MIN_FOLD = 4;   // fold only runs of at least this many hidden lines
+
+// ---- persistence (localStorage may be unavailable) ---------------------------
+const LS = {
+  get(k, d) {
+    try { const v = localStorage.getItem('gitreview:' + k); return v === null ? d : JSON.parse(v); }
+    catch { return d; }
+  },
+  set(k, v) { try { localStorage.setItem('gitreview:' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+};
+
+const state = {
+  info: null,
+  opts: {
+    base: LS.get('base', ''),
+    left: LS.get('left', 'mergebase'),
+    right: LS.get('right', 'worktree'),
+    ws: LS.get('ws', false),
+  },
+  compare: null,
+  files: [],
+  order: [],            // file paths in tree order
+  current: null,        // path the user selected
+  diff: null,           // loaded diff; diff.file.path may lag behind `current` while loading
+  forced: null,         // path for which "show anyway" was chosen
+  comments: [],
+  expanded: new Set(),  // equal-block indexes expanded by the user
+  collapsedDirs: new Set(),
+  seen: {},             // path -> sig when last opened
+  editing: null,        // {side, line} for new comment or {id} for edit
+  draft: '',
+  seq: { diff: 0, files: 0, comments: 0 }, // latest request per kind; older responses are dropped
+  inflight: 0,          // user-initiated diff loads in progress
+  error: null,
+};
+
+// ---- helpers -------------------------------------------------------------------
+const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = s => String(s).replace(/[&<>"']/g, c => ESC[c]);
+
+async function api(url, opts = {}) {
+  if (opts.method && opts.method !== 'GET') {
+    // the server only accepts JSON for state-changing requests (CSRF protection)
+    opts = { ...opts, body: JSON.stringify(opts.json ?? {}), headers: { 'Content-Type': 'application/json' } };
+  }
+  const res = await fetch(url, opts);
+  let data = null;
+  try { data = await res.json(); } catch { /* empty */ }
+  if (!res.ok) throw new Error((data && data.error) || res.statusText);
+  return data;
+}
+
+function compareParams(extra = {}) {
+  const o = state.opts;
+  return new URLSearchParams({ base: o.base, left: o.left, right: o.right, ws: o.ws ? '1' : '0', ...extra }).toString();
+}
+
+let toastTimer;
+function toast(text, isErr = false) {
+  const t = $('#toast');
+  t.textContent = text;
+  t.className = isErr ? 'err' : '';
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, isErr ? 6000 : 3500);
+}
+
+function fmtSize(n) {
+  return n > 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : Math.round(n / 1024) + ' kB';
+}
+
+const STATUS = { M: 'změněn', A: 'přidán', D: 'smazán', R: 'přejmenován', U: 'nový (nesledovaný)', T: 'změna typu' };
+
+// ---- syntax highlighting (language comes from the server, internal/lang) --------
+/* Split highlighted HTML into per-line HTML, closing and reopening spans that
+   cross line breaks so every line is self-contained. */
+function splitHtmlLines(html) {
+  const lines = [];
+  const open = [];
+  let cur = '';
+  const re = /(<span[^>]*>)|(<\/span>)|(\n)|([^<\n]+)/g;
+  let m;
+  while ((m = re.exec(html))) {
+    if (m[1]) { open.push(m[1]); cur += m[1]; }
+    else if (m[2]) { open.pop(); cur += m[2]; }
+    else if (m[3]) { cur += '</span>'.repeat(open.length); lines.push(cur); cur = open.join(''); }
+    else cur += m[4];
+  }
+  lines.push(cur);
+  return lines;
+}
+
+function highlightLines(lines, lang) {
+  const text = lines.join('\n');
+  if (lang && window.hljs && hljs.getLanguage(lang) && lines.length && text.length < 800000) {
+    try {
+      const out = splitHtmlLines(hljs.highlight(text, { language: lang, ignoreIllegals: true }).value);
+      if (out.length === lines.length) return out;
+    } catch { /* fall through */ }
+  }
+  return lines.map(esc);
+}
+
+// ---- word-level diff -----------------------------------------------------------
+const tokenize = s => s.match(/[\p{L}\p{N}_]+|\s+|[^\p{L}\p{N}_\s]/gu) || [];
+
+function changedRanges(tokens, keep, text) {
+  const res = [];
+  let pos = 0;
+  for (let k = 0; k < tokens.length; k++) {
+    const len = tokens[k].length;
+    if (!keep[k]) {
+      const last = res[res.length - 1];
+      // merge with previous range when only whitespace separates them
+      if (last && /^\s*$/.test(text.slice(last[1], pos))) last[1] = pos + len;
+      else res.push([pos, pos + len]);
+    }
+    pos += len;
+  }
+  return res;
+}
+
+/* Returns [leftRanges, rightRanges] of changed character ranges, or null when
+   the lines have nothing meaningful in common (whole line is the change). */
+function wordDiff(a, b) {
+  const ta = tokenize(a), tb = tokenize(b);
+  const n = ta.length, m = tb.length;
+  if (!n || !m || n * m > 250000) return null;
+  const W = m + 1;
+  const dp = new Uint32Array((n + 1) * W);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i * W + j] = ta[i] === tb[j] ? dp[(i + 1) * W + j + 1] + 1 : Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
+    }
+  }
+  const ka = new Array(n).fill(false), kb = new Array(m).fill(false);
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (ta[i] === tb[j]) { ka[i] = kb[j] = true; i++; j++; }
+    else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) i++;
+    else j++;
+  }
+  if (!ta.some((t, k) => ka[k] && /\S/.test(t))) return null;
+  return [changedRanges(ta, ka, a), changedRanges(tb, kb, b)];
+}
+
+/* Wrap character ranges of the underlying text in <span class="w">, walking
+   highlighted HTML (tags and entities) while keeping nesting valid. */
+function applyRanges(html, ranges) {
+  if (!ranges || !ranges.length) return html;
+  const open = '<span class="w">';
+  let out = '', pos = 0, ri = 0, inR = false, i = 0;
+  while (i < html.length) {
+    const ch = html[i];
+    if (ch === '<') {
+      const j = html.indexOf('>', i);
+      const tag = html.slice(i, j + 1);
+      out += inR ? '</span>' + tag + open : tag;
+      i = j + 1;
+      continue;
+    }
+    while (ri < ranges.length && pos >= ranges[ri][1]) {
+      if (inR) { out += '</span>'; inR = false; }
+      ri++;
+    }
+    if (!inR && ri < ranges.length && pos >= ranges[ri][0]) { out += open; inR = true; }
+    let len = 1;
+    if (ch === '&') { const j = html.indexOf(';', i); if (j > i) len = j - i + 1; }
+    out += html.substr(i, len);
+    i += len;
+    pos++;
+  }
+  if (inR) out += '</span>';
+  return out;
+}
+
+/* Similarity of two lines (0..1): Dice coefficient over non-space tokens. */
+function similarity(a, b) {
+  const ta = tokenize(a).filter(t => /\S/.test(t)), tb = tokenize(b).filter(t => /\S/.test(t));
+  if (!ta.length && !tb.length) return 1;
+  if (!ta.length || !tb.length) return 0;
+  const bag = new Map();
+  for (const t of ta) bag.set(t, (bag.get(t) || 0) + 1);
+  let common = 0;
+  for (const t of tb) {
+    const c = bag.get(t);
+    if (c) { common++; bag.set(t, c - 1); }
+  }
+  return 2 * common / (ta.length + tb.length);
+}
+
+/* Align the lines of a modified block like IntelliJ: similar lines end up on
+   the same row, the rest get filler on the other side. Returns [[l|null, r|null]…]
+   with block-relative indexes. */
+const naivePairs = (n, m) => Array.from({ length: Math.max(n, m) }, (_, k) => [k < n ? k : null, k < m ? k : null]);
+
+function alignBlock(left, right) {
+  const n = left.length, m = right.length;
+  if (n * m > 40000) return naivePairs(n, m);
+  const W = m + 1;
+  const sim = new Float32Array(n * m);
+  for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) sim[i * m + j] = similarity(left[i], right[j]);
+  const dp = new Float64Array((n + 1) * W);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      const s = sim[i * m + j];
+      const pair = s >= 0.4 ? s + dp[(i + 1) * W + j + 1] : -1;
+      dp[i * W + j] = Math.max(pair, dp[(i + 1) * W + j], dp[i * W + j + 1]);
+    }
+  }
+  const res = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    const s = sim[i * m + j];
+    if (s >= 0.4 && dp[i * W + j] === s + dp[(i + 1) * W + j + 1]) res.push([i++, j++]);
+    else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) res.push([i++, null]);
+    else res.push([null, j++]);
+  }
+  while (i < n) res.push([i++, null]);
+  while (j < m) res.push([null, j++]);
+  // nothing paired at all: fall back to side-by-side order (reads better)
+  return res.some(p => p[0] != null && p[1] != null) ? res : naivePairs(n, m);
+}
+
+function prepareDiff(d) {
+  d.blocks = d.blocks || [];
+  if (!d.left || !d.right) return;
+  d.htmlL = highlightLines(d.left.lines, d.lang);
+  d.htmlR = highlightLines(d.right.lines, d.lang);
+  let budget = 3000;
+  for (const b of d.blocks) {
+    if (b.type !== 'change' || !b.leftLen || !b.rightLen) continue;
+    b.pairs = alignBlock(
+      d.left.lines.slice(b.leftStart, b.leftStart + b.leftLen),
+      d.right.lines.slice(b.rightStart, b.rightStart + b.rightLen));
+    for (const [l, r] of b.pairs) {
+      if (l == null || r == null || budget-- <= 0) continue;
+      const li = b.leftStart + l, ri = b.rightStart + r;
+      const wd = wordDiff(d.left.lines[li], d.right.lines[ri]);
+      if (wd) {
+        d.htmlL[li] = applyRanges(d.htmlL[li], wd[0]);
+        d.htmlR[ri] = applyRanges(d.htmlR[ri], wd[1]);
+      }
+    }
+  }
+}
+
+// ---- comments for the current file ----------------------------------------------
+/* Maps side -> Map(line -> [comment+stale]) for the open file. Comments whose
+   line no longer exists are shown on the last line; comments that cannot be
+   placed at all (that side is empty, or the diff is not shown) are returned
+   in `orphans` and rendered above the diff. */
+function fileComments() {
+  const res = { left: new Map(), right: new Map(), orphans: [] };
+  const d = state.diff;
+  const own = state.comments.filter(c => c.file === state.current);
+  if (!d || !d.left || !d.blocks.some(b => b.type === 'change')) {
+    res.orphans = own.map(c => ({ ...c, stale: true }));
+    return res;
+  }
+  for (const c of own) {
+    const lines = c.side === 'left' ? d.left.lines : d.right.lines;
+    if (!lines.length) { res.orphans.push({ ...c, stale: true }); continue; }
+    const stale = lines[c.line - 1] !== c.lineText;
+    const line = Math.min(c.line, lines.length);
+    const map = res[c.side];
+    if (!map.has(line)) map.set(line, []);
+    map.get(line).push({ ...c, stale });
+  }
+  return res;
+}
+
+// ---- rows ---------------------------------------------------------------------
+function buildRows(d, cm) {
+  const rows = [];
+  const ed = state.editing && !state.editing.id ? state.editing : null;
+  const pinned = (side, idx) => cm[side].has(idx + 1) || (ed && ed.side === side && ed.line === idx + 1);
+  d.blocks.forEach((b, bi) => {
+    if (b.type === 'equal') {
+      const n = b.leftLen;
+      const vis = new Array(n).fill(false);
+      if (state.expanded.has(bi) || n < MIN_FOLD + 2 * CTX) vis.fill(true);
+      else {
+        const atStart = bi === 0, atEnd = bi === d.blocks.length - 1;
+        for (let k = 0; k < n; k++) {
+          if ((!atStart && k < CTX) || (!atEnd && k >= n - CTX)) vis[k] = true;
+          if (pinned('left', b.leftStart + k) || pinned('right', b.rightStart + k)) {
+            for (let q = Math.max(0, k - 1); q <= Math.min(n - 1, k + 1); q++) vis[q] = true;
+          }
+        }
+      }
+      for (let k = 0; k < n;) {
+        if (vis[k]) { rows.push({ kind: 'eq', l: b.leftStart + k, r: b.rightStart + k }); k++; continue; }
+        let e = k;
+        while (e < n && !vis[e]) e++;
+        if (e - k < MIN_FOLD) {
+          for (; k < e; k++) rows.push({ kind: 'eq', l: b.leftStart + k, r: b.rightStart + k });
+        } else {
+          rows.push({ kind: 'fold', block: bi, count: e - k });
+          k = e;
+        }
+      }
+    } else {
+      const kind = b.leftLen === 0 ? 'add' : b.rightLen === 0 ? 'del' : 'mod';
+      const pairs = b.pairs || naivePairs(b.leftLen, b.rightLen);
+      const n = pairs.length;
+      pairs.forEach(([l, r], k) => {
+        rows.push({
+          kind, block: bi, first: k === 0, last: k === n - 1, size: n,
+          l: l == null ? null : b.leftStart + l,
+          r: r == null ? null : b.rightStart + r,
+        });
+      });
+    }
+  });
+  return rows;
+}
+
+// ---- rendering: diff --------------------------------------------------------------
+function cellsHtml(side, idx) {
+  const s = side === 'left' ? 'l' : 'r';
+  if (idx == null) return `<td class="num filler"></td><td class="code filler" data-s="${s}"></td>`;
+  const html = (side === 'left' ? state.diff.htmlL : state.diff.htmlR)[idx];
+  return `<td class="num" data-side="${side}" data-line="${idx + 1}">${idx + 1}</td>` +
+    `<td class="code" data-s="${s}"><span class="ln">${html || ' '}</span></td>`;
+}
+
+function rowHtml(row) {
+  if (row.kind === 'fold') {
+    return `<tr class="fold" data-block="${row.block}"><td class="num"></td>` +
+      `<td class="code" colspan="4">⋯ ${row.count} nezměněných řádků – klikni pro zobrazení</td></tr>`;
+  }
+  let cls = 'k-' + row.kind;
+  if (row.first) cls += ' first';
+  if (row.last) cls += ' last';
+  const cs = row.first ? ` data-cs="${row.kind}" data-n="${row.size}"` : '';
+  return `<tr class="${cls}"${cs}>${cellsHtml('left', row.l)}<td class="mid"></td>${cellsHtml('right', row.r)}</tr>`;
+}
+
+function commentBoxHtml(c) {
+  const ed = state.editing;
+  if (ed && ed.id === c.id) return editorHtml('Uložit změny');
+  const when = new Date(c.created).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' });
+  const stale = c.stale
+    ? `<span class="stale-badge" title="Řádek se od napsání komentáře změnil. Původně: ${esc(c.lineText)}">zastaralý</span>`
+    : '';
+  const side = c.side === 'left' ? 'původní' : 'nová';
+  return `<div class="cbox${c.stale ? ' stale' : ''}" data-id="${c.id}">` +
+    `<div class="ch"><span>${side} verze · řádek ${c.line} · ${esc(when)}</span>${stale}<span class="sp"></span>` +
+    `<button data-act="edit">Upravit</button><button data-act="delete" class="danger">Smazat</button></div>` +
+    `<div class="ct">${esc(c.text)}</div></div>`;
+}
+
+function editorHtml(label = 'Přidat komentář') {
+  return `<div class="ceditor"><textarea id="ctext" placeholder="Komentář pro Claude…"></textarea>` +
+    `<div class="cbtns"><button class="primary" data-act="save">${label}</button>` +
+    `<button data-act="cancel">Zrušit</button><span class="hint">Ctrl+Enter uloží · Esc zruší</span></div></div>`;
+}
+
+function commentRowHtml(row, cm) {
+  if (row.kind === 'fold') return '';
+  const ed = state.editing && !state.editing.id ? state.editing : null;
+  const parts = ['left', 'right'].map(side => {
+    const idx = side === 'left' ? row.l : row.r;
+    if (idx == null) return '';
+    let h = (cm[side].get(idx + 1) || []).map(commentBoxHtml).join('');
+    if (ed && ed.side === side && ed.line === idx + 1) h += editorHtml();
+    return h;
+  });
+  if (!parts[0] && !parts[1]) return '';
+  return `<tr class="crow"><td colspan="2">${parts[0]}</td><td class="mid"></td><td colspan="2">${parts[1]}</td></tr>`;
+}
+
+/* Comments of the open file that cannot be anchored to a visible line. */
+function orphansHtml(orphans) {
+  if (!orphans.length) return '';
+  return `<div class="orphans"><div class="orphans-head">Komentáře k řádkům, které se teď nezobrazují</div>` +
+    orphans.map(commentBoxHtml).join('') + '</div>';
+}
+
+function renderMessage(html, extra = '') {
+  $('#diff-scroll').innerHTML = `${extra}<div class="msg">${html}</div>`;
+  $('#ruler').innerHTML = '';
+  setHScroll(0, 0);
+  bindEditor();
+}
+
+function bindEditor() {
+  const ta = $('#ctext');
+  if (!ta) return;
+  ta.value = state.draft;
+  ta.focus({ preventScroll: true });
+  ta.addEventListener('input', () => { state.draft = ta.value; });
+}
+
+function emptyDiffMessage(d) {
+  if (d.file.status === 'R') return `Soubor byl jen přejmenován z <b>${esc(d.file.oldPath)}</b>, obsah je beze změny.`;
+  if (!d.left.lines.length && !d.right.lines.length) return 'Soubor je prázdný.';
+  if (state.opts.ws) return 'Soubor se liší jen v bílých znacích (zapnuto „Ignorovat mezery“).';
+  return 'Obsah souboru se neliší (změna oprávnění nebo typu).';
+}
+
+function renderHeader() {
+  const h = $('#diff-header');
+  const d = state.diff;
+  const f = d ? d.file : state.files.find(x => x.path === state.current);
+  if (!f) { h.innerHTML = ''; return; }
+  const old = f.oldPath ? `<span class="old">← ${esc(f.oldPath)}</span>` : '';
+  let sides = '';
+  if (d && d.left && d.right) {
+    const l = d.left.exists ? `<b>${esc(d.left.label)}</b>` : `${esc(d.left.label)} – soubor neexistuje`;
+    const r = d.right.exists ? `<b>${esc(d.right.label)}</b>` : `${esc(d.right.label)} – soubor neexistuje`;
+    sides = `<div class="dh-sides cols" id="dh-sides"><div class="pad-num"></div><div class="side">${l}</div>` +
+      `<div class="pad-mid"></div><div class="side">${r}</div></div>`;
+  }
+  h.innerHTML = `<div class="dh-path"><span class="st st-${f.status}">${STATUS[f.status] || f.status}</span>` +
+    `<span>${esc(f.path)}</span>${old}<span class="hint">F7 / Shift+F7 změny · Alt+↓/↑ soubory · klik na číslo řádku = komentář</span></div>${sides}`;
+}
+
+function renderDiff({ keepScroll = true } = {}) {
+  const sc = $('#diff-scroll');
+  const top = sc.scrollTop;
+  renderHeader();
+  const d = state.diff;
+  if (!d) return;
+  const cm = fileComments();
+  const extra = orphansHtml(cm.orphans);
+  if (d.binary) { renderMessage('Binární soubor – náhled není k dispozici.', extra); return; }
+  if (d.tooLarge) {
+    renderMessage(`Soubor je velký (${fmtSize(d.size)}).<br><button id="btn-force">Zobrazit i tak</button>`, extra);
+    $('#btn-force').onclick = () => { state.forced = state.current; openFile(state.current); };
+    return;
+  }
+  if (!d.blocks.some(b => b.type === 'change')) { renderMessage(emptyDiffMessage(d), extra); return; }
+  let h = extra + '<table class="diff"><colgroup><col class="cn"><col><col class="cm"><col class="cn"><col></colgroup><tbody>';
+  for (const row of buildRows(d, cm)) h += rowHtml(row) + commentRowHtml(row, cm);
+  h += '</tbody></table>';
+  sc.innerHTML = h;
+  if (keepScroll) sc.scrollTop = top;
+  bindEditor();
+  updateHScroll();
+  renderRuler();
+}
+
+// ---- horizontal scrolling (each side scrolls independently) -----------------------
+let charW = 0;
+function measureChar() {
+  const m = $('#measure');
+  charW = m.getBoundingClientRect().width / m.textContent.length || 7.5;
+}
+
+function textWidth(lines) {
+  let max = 0;
+  for (const l of lines) {
+    let w = l.length;
+    if (l.includes('\t')) w += (l.split('\t').length - 1) * 3;
+    if (w > max) max = w;
+  }
+  return Math.ceil(max * charW) + 24;
+}
+
+function setHScroll(wl, wr) {
+  const hl = $('#hs-left'), hr = $('#hs-right');
+  hl.firstElementChild.style.width = wl + 'px';
+  hr.firstElementChild.style.width = wr + 'px';
+  hl.classList.toggle('none', wl <= hl.clientWidth);
+  hr.classList.toggle('none', wr <= hr.clientWidth);
+  syncHScroll();
+}
+
+function updateHScroll() {
+  const d = state.diff;
+  const sc = $('#diff-scroll');
+  // keep the bars aligned with the table despite the vertical scrollbar and ruler
+  const pad = (sc.offsetWidth - sc.clientWidth) + $('#ruler').offsetWidth;
+  $('#hscroll').style.paddingRight = pad + 'px';
+  const ds = $('#dh-sides');
+  if (ds) ds.style.paddingRight = pad + 'px';
+  if (!d || !d.left) { setHScroll(0, 0); return; }
+  setHScroll(textWidth(d.left.lines), textWidth(d.right.lines));
+}
+
+function syncHScroll() {
+  const sc = $('#diff-scroll');
+  sc.style.setProperty('--sxl', -$('#hs-left').scrollLeft + 'px');
+  sc.style.setProperty('--sxr', -$('#hs-right').scrollLeft + 'px');
+}
+
+// ---- overview ruler -----------------------------------------------------------------
+function renderRuler() {
+  const sc = $('#diff-scroll'), ru = $('#ruler');
+  const H = sc.scrollHeight, rh = ru.clientHeight;
+  if (!H || !rh) { ru.innerHTML = ''; return; }
+  const rowH = parseFloat(getComputedStyle(document.body).getPropertyValue('--row-h')) || 19;
+  let h = '';
+  sc.querySelectorAll('tr[data-cs]').forEach(tr => {
+    const top = tr.offsetTop / H * rh;
+    const height = Math.max(3, (+tr.dataset.n * rowH) / H * rh);
+    h += `<i class="${tr.dataset.cs}" style="top:${top}px;height:${height}px"></i>`;
+  });
+  sc.querySelectorAll('tr.crow').forEach(tr => {
+    h += `<i class="cmt" style="top:${tr.offsetTop / H * rh}px;height:3px"></i>`;
+  });
+  ru.innerHTML = h;
+}
+
+// ---- navigation ------------------------------------------------------------------------
+/* Navigation keeps an explicit index of the current change (navIdx) so F7
+   works even when the whole file fits on screen and nothing can scroll.
+   A manual scroll resets it and the position is derived from the viewport. */
+const nav = { idx: null, expectTop: -1 };
+
+function scrollToRow(tr) {
+  const sc = $('#diff-scroll');
+  sc.scrollTop = Math.max(0, tr.offsetTop - sc.clientHeight / 3);
+  nav.expectTop = sc.scrollTop;
+  tr.classList.remove('flash');
+  void tr.offsetWidth;
+  tr.classList.add('flash');
+}
+
+function gotoChange(dir) {
+  const sc = $('#diff-scroll');
+  const marks = [...sc.querySelectorAll('tr[data-cs]')];
+  if (!marks.length) { gotoFile(dir); return; }
+  let next;
+  if (nav.idx != null && nav.idx < marks.length) {
+    next = nav.idx + dir;
+  } else {
+    const anchor = sc.scrollTop + sc.clientHeight / 3;
+    next = dir > 0
+      ? marks.findIndex(tr => tr.offsetTop > anchor + 2)
+      : marks.findLastIndex(tr => tr.offsetTop < anchor - 2);
+  }
+  if (next < 0 || next >= marks.length) { gotoFile(dir, dir > 0 ? 'first' : 'last'); return; }
+  nav.idx = next;
+  scrollToRow(marks[next]);
+}
+
+function gotoFile(dir, landOn) {
+  const i = state.order.indexOf(state.current);
+  const next = state.order[i + dir];
+  if (!next) { toast(dir > 0 ? 'Poslední změna posledního souboru' : 'První změna prvního souboru'); return; }
+  openFile(next, { landOn: landOn || 'first' });
+}
+
+function scrollToChange(which = 'first') {
+  const marks = $('#diff-scroll').querySelectorAll('tr[data-cs]');
+  if (!marks.length) { nav.idx = null; return; }
+  nav.idx = which === 'last' ? marks.length - 1 : 0;
+  scrollToRow(marks[nav.idx]);
+}
+
+function scrollToLine(side, line) {
+  const td = $(`#diff-scroll td.num[data-side="${side}"][data-line="${line}"]`);
+  if (td) scrollToRow(td.parentElement);
+}
+
+// ---- data loading ----------------------------------------------------------------------
+/* Runs fetcher only if no newer request of the same kind started meanwhile;
+   returns undefined for a superseded response. */
+async function latest(kind, fetcher) {
+  const seq = ++state.seq[kind];
+  const res = await fetcher();
+  return seq === state.seq[kind] ? res : undefined;
+}
+
+async function loadInfo() {
+  state.info = await api('/api/info');
+  const valid = b => state.info.bases.some(x => x.exists && x.name === b) || state.info.branches.includes(b);
+  if (!valid(state.opts.base)) {
+    const first = state.info.bases.find(b => b.exists);
+    state.opts.base = first ? first.name : (state.info.branches[0] || 'develop');
+  }
+  renderToolbar();
+}
+
+async function loadFiles() {
+  const r = await latest('files', () => api('/api/files?' + compareParams()).then(d => ({ d }), e => ({ e })));
+  if (!r) return;
+  if (r.e) {
+    state.compare = null;
+    state.files = [];
+    state.error = r.e.message;
+  } else {
+    state.compare = r.d.compare;
+    state.files = r.d.files;
+    state.error = null;
+  }
+  renderSidebar();
+}
+
+async function loadComments() {
+  const r = await latest('comments', () => api('/api/comments').then(d => ({ d }), e => ({ e })));
+  if (!r) return;
+  if (r.e) toast(r.e.message, true);
+  else state.comments = r.d;
+  const n = state.comments.length;
+  const b = $('#comment-count');
+  b.textContent = n;
+  b.classList.toggle('has', n > 0);
+  if (!$('#comments-panel').hidden) renderCommentsPanel();
+}
+
+/* Reload comments after a change and redraw everything that shows them. */
+async function refreshComments() {
+  await loadComments();
+  renderSidebar();
+  renderDiff();
+}
+
+/* Opens a file. keepScroll (used by auto-refresh) keeps position, folds and an
+   open comment editor, but only when that same file is already rendered. */
+async function openFile(path, { keepScroll = false, landOn = 'first', line = null } = {}) {
+  const sc = $('#diff-scroll');
+  keepScroll = keepScroll && state.diff != null && state.diff.file.path === path;
+  if (!keepScroll) {
+    state.expanded.clear();
+    state.editing = null;
+    nav.idx = null;
+    if (path !== state.current) state.forced = null;
+  }
+  state.current = path;
+  if (state.info) LS.set('file:' + state.info.root, path);
+  const f = state.files.find(x => x.path === path);
+  if (f) state.seen[path] = f.sig;
+  renderSidebar();
+  if (!keepScroll) state.inflight++;
+  let r;
+  try {
+    r = await latest('diff', () => api('/api/diff?' + compareParams({ path, force: state.forced === path ? '1' : '0' }))
+      .then(d => ({ d }), e => ({ e })));
+  } finally {
+    if (!keepScroll) state.inflight--;
+  }
+  if (!r) return;
+  if (r.e) {
+    state.diff = null;
+    renderHeader();
+    renderMessage(`<span class="err">${esc(r.e.message)}</span>`);
+    return;
+  }
+  prepareDiff(r.d);
+  state.diff = r.d;
+  if (!keepScroll) {
+    $('#hs-left').scrollLeft = 0;
+    $('#hs-right').scrollLeft = 0;
+    sc.scrollTop = 0;
+  }
+  renderDiff({ keepScroll });
+  if (!keepScroll) {
+    if (line) scrollToLine(line.side, line.line);
+    else scrollToChange(landOn);
+  }
+}
+
+let refreshTimer;
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(refresh, 250);
+}
+
+async function refresh() {
+  // never override a file the user is just opening (F7, Alt+↓, click):
+  // its scroll target would be lost – try again once it has loaded
+  if (state.inflight) { scheduleRefresh(); return; }
+  try { await loadInfo(); } catch { /* keep previous */ }
+  await Promise.all([loadFiles(), loadComments()]);
+  if (state.inflight) { scheduleRefresh(); return; }
+  if (state.current && state.files.some(f => f.path === state.current)) {
+    await openFile(state.current, { keepScroll: true });
+  } else if (state.current) {
+    state.diff = null;
+    renderHeader();
+    renderMessage('Soubor už není mezi změnami.');
+  } else if (state.order.length) {
+    openFile(state.order[0]);
+  }
+  const live = $('#live');
+  live.classList.add('flash');
+  setTimeout(() => live.classList.remove('flash'), 600);
+}
+
+function connectEvents() {
+  const live = $('#live');
+  let first = true;
+  const es = new EventSource('/api/events');
+  es.addEventListener('hello', () => {
+    live.classList.add('on');
+    live.title = 'Auto-refresh: připojeno';
+    if (!first) scheduleRefresh(); // reconnected – we may have missed changes
+    first = false;
+  });
+  es.addEventListener('changed', scheduleRefresh);
+  es.onerror = () => {
+    live.classList.remove('on');
+    live.title = 'Auto-refresh: odpojeno, zkouším znovu…';
+  };
+}
+
+// ---- rendering: toolbar + sidebar --------------------------------------------------------
+function renderToolbar() {
+  const info = state.info;
+  $('#repo-name').textContent = info.name;
+  $('#repo-name').title = info.root;
+  document.title = `${info.name} – gitreview`;
+  const head = info.head;
+  $('#branch').textContent = head.detached ? `detached @ ${(head.sha || '').slice(0, 8)}` : head.branch;
+
+  const sel = $('#opt-base');
+  const main = info.bases.map(b =>
+    `<option value="${esc(b.name)}"${b.exists ? '' : ' disabled'}>${esc(b.name)}` +
+    `${b.exists ? (b.ref !== b.name ? ` (${esc(b.ref)})` : '') : ' – neexistuje'}</option>`).join('');
+  const others = info.branches.filter(b => !info.bases.some(x => x.name === b || x.ref === b));
+  sel.innerHTML = main + (others.length
+    ? `<optgroup label="Ostatní větve">${others.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`
+    : '');
+  sel.value = state.opts.base;
+  $('#opt-left').value = state.opts.left;
+  $('#opt-right').value = state.opts.right;
+  $('#opt-ws').checked = state.opts.ws;
+}
+
+function viewedMap() { return state.info ? LS.get('viewed:' + state.info.root, {}) : {}; }
+
+function buildTree(files) {
+  const root = { dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.path.split('/');
+    let n = root;
+    for (const p of parts.slice(0, -1)) {
+      if (!n.dirs.has(p)) n.dirs.set(p, { name: p, dirs: new Map(), files: [] });
+      n = n.dirs.get(p);
+    }
+    n.files.push(f);
+  }
+  const sortNode = n => {
+    n.dirs = new Map([...n.dirs].sort(([a], [b]) => a.localeCompare(b)));
+    n.files.sort((a, b) => a.path.localeCompare(b.path));
+    n.dirs.forEach(sortNode);
+  };
+  sortNode(root);
+  return root;
+}
+
+function renderSidebar() {
+  const sum = $('#summary');
+  const tree = $('#tree');
+  const c = state.compare;
+  if (state.error) {
+    sum.innerHTML = `<span class="err">${esc(state.error)}</span>`;
+    tree.innerHTML = '';
+    state.order = [];
+    return;
+  }
+  if (!c) { sum.textContent = 'Načítám…'; return; }
+  const add = state.files.reduce((a, f) => a + f.added, 0);
+  const del = state.files.reduce((a, f) => a + f.deleted, 0);
+  sum.innerHTML = `<b>${state.files.length}</b> souborů · <span class="stat"><span class="a">+${add}</span> <span class="d">−${del}</span></span>` +
+    `<span class="lbl" title="${esc(c.left.label)}">◀ ${esc(c.left.label)}</span>` +
+    `<span class="lbl" title="${esc(c.right.label)}">▶ ${esc(c.right.label)}</span>` +
+    (c.onBase ? `<span class="lbl err">Jsi přímo na větvi ${esc(c.base)}.</span>` : '');
+
+  const viewed = viewedMap();
+  const counts = {};
+  for (const cm of state.comments) counts[cm.file] = (counts[cm.file] || 0) + 1;
+  const order = []; // navigation order includes files inside collapsed dirs
+  const fileHtml = (f, depth) => {
+    const name = f.path.split('/').pop();
+    const isViewed = viewed[f.path] === f.sig;
+    const changed = (state.seen[f.path] && state.seen[f.path] !== f.sig) || (viewed[f.path] && !isViewed);
+    const cls = `tnode tfile st-${f.status}${f.path === state.current ? ' active' : ''}${isViewed ? ' viewed' : ''}`;
+    const stat = f.binary ? '<span class="stat">bin</span>'
+      : `<span class="stat"><span class="a">+${f.added}</span> <span class="d">−${f.deleted}</span></span>`;
+    return `<div class="${cls}" data-path="${esc(f.path)}" style="padding-left:${8 + depth * 14}px" title="${esc(f.path)} – ${STATUS[f.status] || f.status}">` +
+      `<input type="checkbox" class="viewed-chk" title="Zkontrolováno"${isViewed ? ' checked' : ''}>` +
+      `<span class="name">${esc(name)}</span>` +
+      (f.oldPath ? `<span class="old">← ${esc(f.oldPath.split('/').pop())}</span>` : '') +
+      (changed ? '<span class="dot" title="Změněno od posledního zobrazení">●</span>' : '') +
+      (counts[f.path] ? `<span class="cc" title="Komentáře">✎${counts[f.path]}</span>` : '') +
+      stat + '</div>';
+  };
+  // one sorted traversal: always records the order, emits HTML only when visible
+  const walk = (node, prefix, depth, visible) => {
+    let h = '';
+    for (const d of node.dirs.values()) {
+      let name = d.name, cur = d, path = prefix + d.name;
+      while (!cur.files.length && cur.dirs.size === 1) { // compact single-child chains
+        cur = cur.dirs.values().next().value;
+        name += '/' + cur.name;
+        path += '/' + cur.name;
+      }
+      const collapsed = state.collapsedDirs.has(path);
+      if (visible) {
+        h += `<div class="tnode tdir${collapsed ? ' collapsed' : ''}" data-dir="${esc(path)}" style="padding-left:${8 + depth * 14}px">` +
+          `<span class="arrow">▾</span><span>${esc(name)}</span></div>`;
+      }
+      h += walk(cur, path + '/', depth + 1, visible && !collapsed);
+    }
+    for (const f of node.files) {
+      order.push(f.path);
+      if (visible) h += fileHtml(f, depth);
+    }
+    return h;
+  };
+  const html = walk(buildTree(state.files), '', 0, true);
+  tree.innerHTML = html || `<div class="msg">${c.onBase ? 'Žádné změny – jsi na base větvi.' : 'Žádné změny.'}</div>`;
+  state.order = order;
+}
+
+// ---- comments panel ------------------------------------------------------------------------
+let confirmClear = false;
+function renderCommentsPanel() {
+  const p = $('#comments-panel');
+  const cs = state.comments;
+  let h = `<div class="cp-head"><b>Komentáře (${cs.length})</b>` +
+    `<button data-act="export">Export REVIEW.md</button><button data-act="copy">Kopírovat</button>` +
+    `<button data-act="clear" class="danger">${confirmClear ? 'Opravdu smazat vše?' : 'Smazat vše'}</button>` +
+    `<button data-act="close">✕</button></div>`;
+  if (!cs.length) h += '<div class="empty">Zatím žádné komentáře. Klikni na číslo řádku v diffu.</div>';
+  let file = null;
+  for (const c of cs) {
+    if (c.file !== file) { file = c.file; h += `<div class="cp-file">${esc(file)}</div>`; }
+    h += `<div class="cp-item" data-file="${esc(c.file)}" data-side="${c.side}" data-line="${c.line}">` +
+      `<div class="ln">${c.side === 'left' ? 'původní' : 'nová'} verze · řádek ${c.line}</div>` +
+      `<div class="tx">${esc(c.text)}</div></div>`;
+  }
+  p.innerHTML = h;
+}
+
+// ---- actions -----------------------------------------------------------------------------------
+function startComment(side, line) {
+  if (!state.diff || state.diff.file.path !== state.current) return; // a different file is loading
+  state.editing = { side, line };
+  state.draft = '';
+  renderDiff();
+}
+
+async function saveComment() {
+  const ed = state.editing;
+  const text = state.draft.trim();
+  if (!ed || !text) { toast('Komentář je prázdný', true); return; }
+  try {
+    if (ed.id) {
+      await api('/api/comments', { method: 'PUT', json: { id: ed.id, text } });
+    } else {
+      const lines = ed.side === 'left' ? state.diff.left.lines : state.diff.right.lines;
+      const from = Math.max(1, ed.line - 2), to = Math.min(lines.length, ed.line + 2);
+      await api('/api/comments', {
+        method: 'POST',
+        json: {
+          file: state.current, side: ed.side, line: ed.line, lineText: lines[ed.line - 1] ?? '',
+          context: lines.slice(from - 1, to), contextStart: from, text,
+        },
+      });
+    }
+  } catch (e) { toast(e.message, true); return; }
+  state.editing = null;
+  state.draft = '';
+  await refreshComments();
+}
+
+function cancelEdit() {
+  state.editing = null;
+  state.draft = '';
+  renderDiff();
+}
+
+async function deleteComment(id) {
+  try { await api('/api/comments?id=' + encodeURIComponent(id), { method: 'DELETE' }); }
+  catch (e) { toast(e.message, true); return; }
+  await refreshComments();
+}
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  // plain http on a LAN address: Clipboard API is unavailable, use the legacy path
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand('copy');
+  ta.remove();
+  return ok ? Promise.resolve() : Promise.reject(new Error('Kopírování do schránky selhalo'));
+}
+
+async function exportReview(write) {
+  if (!state.comments.length) { toast('Žádné komentáře k exportu'); return; }
+  const c = state.compare;
+  let r;
+  try {
+    r = await api('/api/export', {
+      method: 'POST',
+      json: { write, left: c ? c.left.label : '', right: c ? c.right.label : '' },
+    });
+  } catch (e) { toast(e.message, true); return; }
+  if (write) {
+    toast(`Zapsáno ${r.count} připomínek do ${r.path} – v Claude napiš „zapracuj REVIEW.md“`);
+  } else {
+    try { await copyText(r.markdown); toast(`Zkopírováno ${r.count} připomínek do schránky`); }
+    catch (e) { toast(e.message, true); }
+  }
+}
+
+const EXPORT_ACTIONS = { export: () => exportReview(true), copy: () => exportReview(false) };
+
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  LS.set('theme', t);
+}
+
+async function changeOpts() {
+  const o = state.opts;
+  o.base = $('#opt-base').value;
+  o.left = $('#opt-left').value;
+  o.right = $('#opt-right').value;
+  o.ws = $('#opt-ws').checked;
+  for (const k of Object.keys(o)) LS.set(k, o[k]);
+  await loadFiles();
+  const target = state.files.some(f => f.path === state.current) ? state.current : state.order[0];
+  if (target) openFile(target);
+  else { state.current = null; state.diff = null; renderHeader(); renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : 'Žádné změny.'); }
+}
+
+// ---- events ----------------------------------------------------------------------------------------
+function bindUI() {
+  ['#opt-base', '#opt-left', '#opt-right', '#opt-ws'].forEach(s => $(s).addEventListener('change', changeOpts));
+  $('#btn-theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+  $('#btn-export').onclick = EXPORT_ACTIONS.export;
+  $('#btn-copy').onclick = EXPORT_ACTIONS.copy;
+  $('#btn-comments').onclick = () => {
+    const p = $('#comments-panel');
+    p.hidden = !p.hidden;
+    confirmClear = false;
+    if (!p.hidden) renderCommentsPanel();
+  };
+
+  $('#comments-panel').addEventListener('click', async e => {
+    const btn = e.target.closest('button[data-act]');
+    if (btn) {
+      const act = btn.dataset.act;
+      if (act === 'close') $('#comments-panel').hidden = true;
+      else if (EXPORT_ACTIONS[act]) EXPORT_ACTIONS[act]();
+      else if (act === 'clear') {
+        if (!confirmClear) { confirmClear = true; renderCommentsPanel(); return; }
+        confirmClear = false;
+        try { await api('/api/comments?all=1', { method: 'DELETE' }); } catch (err) { toast(err.message, true); }
+        await refreshComments();
+      }
+      return;
+    }
+    const item = e.target.closest('.cp-item');
+    if (item) {
+      const { file, side, line } = item.dataset;
+      if (!state.files.some(f => f.path === file)) { toast('Soubor není v aktuálním porovnání', true); return; }
+      if (file === state.current) scrollToLine(side, +line);
+      else openFile(file, { line: { side, line: +line } });
+    }
+  });
+
+  $('#tree').addEventListener('click', e => {
+    const dir = e.target.closest('.tdir');
+    if (dir) {
+      const p = dir.dataset.dir;
+      state.collapsedDirs.has(p) ? state.collapsedDirs.delete(p) : state.collapsedDirs.add(p);
+      renderSidebar();
+      return;
+    }
+    const node = e.target.closest('.tfile');
+    if (!node) return;
+    const path = node.dataset.path;
+    if (e.target.classList.contains('viewed-chk')) {
+      const v = viewedMap();
+      const f = state.files.find(x => x.path === path);
+      if (e.target.checked && f) v[path] = f.sig; else delete v[path];
+      LS.set('viewed:' + state.info.root, v);
+      if (f) state.seen[path] = f.sig;
+      renderSidebar();
+      return;
+    }
+    openFile(path);
+  });
+
+  const sc = $('#diff-scroll');
+  sc.addEventListener('click', e => {
+    const num = e.target.closest('td.num[data-line]');
+    if (num) { startComment(num.dataset.side, +num.dataset.line); return; }
+    const fold = e.target.closest('tr.fold');
+    if (fold) { state.expanded.add(+fold.dataset.block); renderDiff(); return; }
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    const box = btn.closest('.cbox');
+    if (act === 'save') saveComment();
+    else if (act === 'cancel') cancelEdit();
+    else if (act === 'edit' && box) {
+      const c = state.comments.find(x => x.id === box.dataset.id);
+      state.editing = { id: c.id };
+      state.draft = c.text;
+      renderDiff();
+    } else if (act === 'delete' && box) deleteComment(box.dataset.id);
+  });
+  sc.addEventListener('keydown', e => {
+    if (e.target.id !== 'ctext') return;
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveComment(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
+  });
+  sc.addEventListener('scroll', () => {
+    if (Math.abs(sc.scrollTop - nav.expectTop) > 2) nav.idx = null; // user scrolled manually
+  });
+  sc.addEventListener('wheel', e => {
+    const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
+    if (!dx) return;
+    const td = e.target.closest('td.code[data-s]');
+    if (!td) return;
+    $(td.dataset.s === 'l' ? '#hs-left' : '#hs-right').scrollLeft += dx;
+    e.preventDefault();
+  }, { passive: false });
+  $('#hs-left').addEventListener('scroll', syncHScroll);
+  $('#hs-right').addEventListener('scroll', syncHScroll);
+  $('#ruler').addEventListener('click', e => {
+    const ru = $('#ruler');
+    const y = e.clientY - ru.getBoundingClientRect().top;
+    sc.scrollTop = y / ru.clientHeight * sc.scrollHeight - sc.clientHeight / 2;
+  });
+
+  window.addEventListener('resize', () => { updateHScroll(); renderRuler(); });
+
+  document.addEventListener('keydown', e => {
+    const typing = /^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName) && e.target.type !== 'checkbox';
+    if (e.key === 'Escape') {
+      if (!$('#comments-panel').hidden) $('#comments-panel').hidden = true;
+      else if (state.editing) cancelEdit();
+      return;
+    }
+    if (typing) return;
+    if (e.key === 'F7') { e.preventDefault(); gotoChange(e.shiftKey ? -1 : 1); }
+    else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoFile(1); }
+    else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoFile(-1); }
+  });
+
+  // sidebar resizing
+  const rz = $('#resizer');
+  rz.addEventListener('mousedown', e => {
+    e.preventDefault();
+    rz.classList.add('drag');
+    const move = ev => {
+      const w = Math.min(Math.max(160, ev.clientX), window.innerWidth - 300);
+      document.body.style.setProperty('--sidebar-w', w + 'px');
+    };
+    const up = () => {
+      rz.classList.remove('drag');
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      LS.set('sidebarW', getComputedStyle(document.body).getPropertyValue('--sidebar-w'));
+      updateHScroll();
+      renderRuler();
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+}
+
+// ---- start ---------------------------------------------------------------------------------------------
+async function init() {
+  applyTheme(LS.get('theme', 'dark'));
+  const sw = LS.get('sidebarW', null);
+  if (sw) document.body.style.setProperty('--sidebar-w', sw);
+  measureChar();
+  bindUI();
+  try {
+    await loadInfo();
+  } catch (e) {
+    renderMessage(`<span class="err">${esc(e.message)}</span>`);
+    return;
+  }
+  await Promise.all([loadComments(), loadFiles()]);
+  const last = LS.get('file:' + state.info.root, null);
+  const first = state.files.some(f => f.path === last) ? last : state.order[0];
+  if (first) openFile(first);
+  else renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : 'Žádné změny oproti zvolené větvi.');
+  connectEvents();
+}
+
+init();
