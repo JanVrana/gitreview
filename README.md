@@ -2,6 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/JanVrana/gitreview)](https://github.com/JanVrana/gitreview/releases/latest)
 [![Go](https://img.shields.io/github/go-mod/go-version/JanVrana/gitreview)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-blue)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 
@@ -125,3 +126,7 @@ Layout:
 - `internal/lang`: file-to-language mapping (syntax highlighting and export)
 - `internal/server`: HTTP API, CSRF and DNS-rebinding protection, shared SSE watcher
 - `web/`: vanilla JS frontend
+
+## License
+
+[MIT](LICENSE). The bundled [highlight.js](https://highlightjs.org/) (`web/vendor/`) is licensed under BSD-3-Clause.

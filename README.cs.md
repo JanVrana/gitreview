@@ -2,6 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/JanVrana/gitreview)](https://github.com/JanVrana/gitreview/releases/latest)
 [![Go](https://img.shields.io/github/go-mod/go-version/JanVrana/gitreview)](go.mod)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 ![Platformy](https://img.shields.io/badge/platformy-linux%20%7C%20macOS-blue)
 ![Závislosti](https://img.shields.io/badge/závislosti-žádné-brightgreen)
 
@@ -105,3 +106,7 @@ Struktura:
 - `internal/lang`: mapování souborů na jazyk (pro zvýraznění syntaxe i export)
 - `internal/server`: HTTP API, ochrana proti CSRF a DNS rebindingu, sdílený SSE watcher
 - `web/`: vanilla JS frontend
+
+## Licence
+
+[MIT](LICENSE). Přibalený [highlight.js](https://highlightjs.org/) (`web/vendor/`) je pod licencí BSD-3-Clause.
