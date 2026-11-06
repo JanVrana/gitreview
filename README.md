@@ -90,7 +90,7 @@ On startup it prints the URLs it is reachable on (the machine's IP addresses), e
 
 1. Let the agent work on a branch.
 2. Open gitreview, go through the changed files and click a line number to leave a comment.
-3. Click **Export REVIEW.md**. This writes all comments with code snippets to `REVIEW.md` in the repository root. **Copy** copies the same text to the clipboard instead.
+3. Click **Export**. This writes all comments with code snippets to `REVIEW.md` in the repository root. **⧉** (copy) puts the same text on the clipboard instead.
 4. Tell the agent: *"address the comments in REVIEW.md"*.
 5. The page refreshes by itself as the agent edits files. Comments whose line has changed are marked as stale.
 
@@ -142,13 +142,13 @@ Further protections, also active with `-no-auth`:
   - stored in `.git/gitreview/comments.json`,
   - `REVIEW.md` is added to `.git/info/exclude` automatically, so it never gets committed,
   - copying to the clipboard works over plain http too.
-- **Settings (⚙):** themes Darcula (dark), Light, Solarized Dark/Light, Nord, Monokai and Midnight, English or Czech UI, code font (installed monospace fonts, or any other by name) and size; row height scales with the size. The language defaults to your browser's; the exported `REVIEW.md` follows the UI language.
+- **Settings (⚙):** themes Darcula (dark), Light, Solarized Dark/Light, Nord, Monokai and Midnight, English or Czech UI, code font (installed monospace fonts, or any other by name) and size, and the size of the rest of the UI. When the window is narrow, the toolbar hides the labels of its selects (they keep their tooltips) instead of wrapping. The language defaults to your browser's; the exported `REVIEW.md` follows the UI language.
 
 ## Git operations
 
 Basic operations to finish a review without a terminal. Another agent may be working in the same repository at the same time, so none of them forces anything:
 
-- **Commit (n):** opens a panel with the uncommitted files (staged, unstaged and new). Untick what should stay out, write a message, Commit (Ctrl+Enter). Only the ticked files are committed; other staged changes stay staged. If HEAD moved since the panel was loaded (someone committed meanwhile), the commit is refused.
+- **Commit (n):** opens a panel with the uncommitted files (staged, unstaged and new). Untick what should stay out, write a message, Commit (Ctrl+Enter). Only the ticked files are committed; other staged changes stay staged. If HEAD moves while the panel is open (someone, e.g. the agent, committed meanwhile), the panel says so and Commit stays disabled until you confirm you checked the files again; the server also refuses a commit made against an outdated HEAD.
 - **↶ Revert:** in the commit panel or in the diff header of an uncommitted file. Discards its uncommitted changes (a new file is deleted) after an inline confirmation.
 - **Push:** pushes the current branch; without an upstream it creates `origin/<branch>` and sets it (`-u`). Never forced, a rejected push is reported. `↑N ↓M` next to the branch shows what there is to push and pull (as of the last fetch).
 - **Pull:** `git pull --ff-only`. A diverged branch or a pull that would overwrite uncommitted files is refused by git and reported.

@@ -40,6 +40,7 @@ const state = {
   error: null,
   pending: { head: '', files: [] }, // uncommitted files (commit panel)
   cmUnchecked: new Set(), // files the user excluded from the commit
+  cmHead: null,            // HEAD the open commit panel was reviewed against
   confirm: null,        // pending confirmation: {kind: 'revert', path} | {kind: 'stash', action}
 };
 
@@ -668,8 +669,13 @@ async function loadStatus() {
   const b = $('#pending-count');
   b.textContent = state.pending.files.length;
   b.classList.toggle('has', state.pending.files.length > 0);
-  if (!$('#commit-panel').hidden) renderCommitFiles();
+  if ($('#commit-panel').hidden) return;
+  if (!state.cmHead) state.cmHead = state.pending.head;
+  renderCommitFiles();
 }
+
+/* Someone (e.g. Claude Code) committed while the commit panel was open. */
+const headMoved = () => !!state.cmHead && !!state.pending && state.cmHead !== state.pending.head;
 
 async function loadFiles() {
   const r = await latest('files', () => api('/api/files?' + compareParams()).then(d => ({ d }), e => ({ e })));
@@ -846,6 +852,31 @@ function renderToolbar() {
   $('#opt-left').value = state.opts.left;
   $('#opt-right').value = state.opts.right;
   $('#opt-ws').checked = state.opts.ws;
+  fitToolbar();
+}
+
+/* Drops the select labels (and then the whitespace label) while the toolbar would wrap;
+   the controls keep their tooltips. */
+function fitToolbar() {
+  const bar = $('#toolbar');
+  const wraps = () => {
+    const items = [...bar.children].filter(e => e.offsetWidth);
+    // items of one row are vertically centered, so compare whole boxes, not tops
+    return items[items.length - 1].getBoundingClientRect().top >= items[0].getBoundingClientRect().bottom;
+  };
+  bar.classList.remove('compact', 'compact2');
+  if (wraps()) bar.classList.add('compact');
+  if (wraps()) bar.classList.add('compact2');
+  placeMenu();
+}
+
+/* The settings menu opens to the left of the gear, or to the right when there is no room. */
+function placeMenu() {
+  const menu = $('#settings-menu');
+  if (menu.hidden) return;
+  menu.style.right = menu.style.left = '';
+  const fitsLeft = $('#btn-settings').getBoundingClientRect().right >= menu.offsetWidth + 8;
+  if (!fitsLeft) { menu.style.right = 'auto'; menu.style.left = '0'; }
 }
 
 /* Badge next to the base selector when the local base branch is behind its
@@ -1036,9 +1067,12 @@ async function stashAction(action) {
 function renderCommitFiles() {
   const el = $('#cm-files');
   const fs = state.pending.files;
-  if (!fs.length) { el.innerHTML = `<div class="empty">${t('noPending')}</div>`; return; }
+  const moved = headMoved();
+  $('#commit-panel [data-act="commit"]').disabled = moved;
+  const warn = moved ? `<div class="cm-moved">${esc(t('headMovedWarn'))}<button data-act="ack">${t('headMovedAck')}</button></div>` : '';
+  if (!fs.length) { el.innerHTML = warn + `<div class="empty">${t('noPending')}</div>`; return; }
   const c = state.confirm;
-  el.innerHTML = fs.map(f => {
+  el.innerHTML = warn + fs.map(f => {
     const conf = c && c.kind === 'revert' && c.path === f.path;
     return `<div class="cm-file" data-path="${esc(f.path)}"><label>` +
       `<input type="checkbox" class="cm-chk"${state.cmUnchecked.has(f.path) ? '' : ' checked'}>` +
@@ -1053,6 +1087,7 @@ function toggleCommitPanel(open) {
   p.hidden = !open;
   if (!open) return;
   $('#comments-panel').hidden = true;
+  state.cmHead = state.pending ? state.pending.head : null;
   renderCommitFiles();
   loadStatus();
   $('#cm-msg').focus();
@@ -1063,9 +1098,11 @@ async function doCommit() {
   const message = $('#cm-msg').value.trim();
   if (!paths.length) { toast(t('noSelection'), true); return; }
   if (!message) { toast(t('emptyMessage'), true); $('#cm-msg').focus(); return; }
+  if (headMoved()) { renderCommitFiles(); return; }
+  // the HEAD the user reviewed, so a commit made by someone else meanwhile is refused by the server
   const ok = await gitOp($('#commit-panel [data-act="commit"]'), '/api/commit',
-    { paths, message, head: state.pending.head }, r => t('committed', r.sha.slice(0, 8), paths.length));
-  if (ok) { $('#cm-msg').value = ''; state.cmUnchecked.clear(); }
+    { paths, message, head: state.cmHead || state.pending.head }, r => t('committed', r.sha.slice(0, 8), paths.length));
+  if (ok) { $('#cm-msg').value = ''; state.cmUnchecked.clear(); state.cmHead = null; }
 }
 
 // ---- updates (settings menu) ---------------------------------------------------------------
@@ -1226,6 +1263,18 @@ function fillFonts() {
   }
 }
 
+/* UI text size: everything outside the code is sized in rem. */
+const UI_SIZE = { min: 10, max: 20, def: 13 };
+function applyUiSize(size) {
+  size = Math.min(UI_SIZE.max, Math.max(UI_SIZE.min, +size || UI_SIZE.def));
+  document.documentElement.style.fontSize = size + 'px';
+  $('#set-ui-size').value = size;
+  LS.set('uiSize', size);
+  fitToolbar();
+  updateHScroll();
+  renderRuler();
+}
+
 function chosenFont() {
   return $('#set-font').value === '__custom' ? $('#set-font-custom').value : $('#set-font').value;
 }
@@ -1288,11 +1337,7 @@ function bindUI() {
   const showMenu = open => {
     menu.hidden = !open;
     gear.setAttribute('aria-expanded', String(open));
-    if (!open) return;
-    // opens to the left of the gear; when the toolbar wraps the gear can sit near the left edge
-    const fitsLeft = gear.getBoundingClientRect().right >= menu.offsetWidth + 8;
-    menu.style.right = fitsLeft ? '' : 'auto';
-    menu.style.left = fitsLeft ? '' : '0';
+    placeMenu();
   };
   gear.onclick = e => { e.stopPropagation(); showMenu(menu.hidden); };
   document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.settings')) showMenu(false); });
@@ -1313,6 +1358,10 @@ function bindUI() {
   const stepFont = d => applyFont(chosenFont(), (+$('#set-size').value || FONT_SIZE.def) + d);
   $('#font-dec').onclick = () => stepFont(-0.5);
   $('#font-inc').onclick = () => stepFont(0.5);
+  $('#set-ui-size').addEventListener('change', e => applyUiSize(e.target.value));
+  const stepUi = d => applyUiSize((+$('#set-ui-size').value || UI_SIZE.def) + d);
+  $('#ui-dec').onclick = () => stepUi(-0.5);
+  $('#ui-inc').onclick = () => stepUi(0.5);
   $('#btn-export').onclick = EXPORT_ACTIONS.export;
   $('#btn-fetch').onclick = fetchRemote;
   $('#btn-push').onclick = e => gitOp(e.currentTarget, '/api/push', {}, pushDone);
@@ -1335,6 +1384,7 @@ function bindUI() {
     const act = btn.dataset.act;
     if (act === 'close') toggleCommitPanel(false);
     else if (act === 'commit') doCommit();
+    else if (act === 'ack') { state.cmHead = state.pending.head; renderCommitFiles(); }
     else if (act === 'revert') { state.confirm = { kind: 'revert', path: row.dataset.path }; renderCommitFiles(); }
     else if (act === 'yes') revertFile(row.dataset.path);
     else if (act === 'no') { state.confirm = null; renderCommitFiles(); }
@@ -1468,7 +1518,7 @@ function bindUI() {
     sc.scrollTop = y / ru.clientHeight * sc.scrollHeight - sc.clientHeight / 2;
   });
 
-  window.addEventListener('resize', () => { updateHScroll(); renderRuler(); });
+  window.addEventListener('resize', () => { fitToolbar(); updateHScroll(); renderRuler(); });
 
   document.addEventListener('keydown', e => {
     const typing = /^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName) && e.target.type !== 'checkbox';
@@ -1517,6 +1567,7 @@ async function init() {
   const sw = LS.get('sidebarW', null);
   if (sw) document.body.style.setProperty('--sidebar-w', sw);
   fillFonts();
+  applyUiSize(LS.get('uiSize', UI_SIZE.def));
   applyFont(LS.get('font', ''), LS.get('fontSize', FONT_SIZE.def));
   bindUI();
   try {

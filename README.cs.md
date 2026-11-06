@@ -129,17 +129,17 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
 - **Auto-refresh:** když Claude změní soubor, commitne nebo přepne větev, UI se samo obnoví (polling ~1,5 s přes SSE).
 - **Review komentáře:**
   - klikem na číslo řádku přidáš komentář,
-  - **Export REVIEW.md** zapíše komentáře do kořene repa a v Claude pak stačí napsat *„zapracuj REVIEW.md“*,
-  - **Kopírovat** (v anglickém UI **Copy**) dá totéž do schránky (funguje i na plain http).
+  - **Export** zapíše komentáře do kořene repa a v Claude pak stačí napsat *„zapracuj REVIEW.md“*,
+  - **⧉** (kopírovat) dá totéž do schránky (funguje i na plain http).
   - Komentáře se ukládají do `.git/gitreview/comments.json`. `REVIEW.md` se automaticky přidá do `.git/info/exclude`, takže se necommitne.
   - Když se řádek pod komentářem změní, komentář se označí jako „zastaralý“.
-- **Nastavení (⚙):** témata Darcula (tmavé), Světlé, Solarized Dark/Light, Nord, Monokai a Midnight, angličtina nebo čeština, písmo kódu (nainstalovaná neproporcionální písma, nebo jiné podle názvu) a jeho velikost; výška řádků se přizpůsobí. Výchozí jazyk se řídí prohlížečem; exportovaný `REVIEW.md` je v jazyce UI.
+- **Nastavení (⚙):** témata Darcula (tmavé), Světlé, Solarized Dark/Light, Nord, Monokai a Midnight, angličtina nebo čeština, písmo kódu (nainstalovaná neproporcionální písma, nebo jiné podle názvu) a jeho velikost a velikost zbytku rozhraní. V úzkém okně lišta místo zalamování schová popisky výběrů (zůstanou v tooltipu). Výchozí jazyk se řídí prohlížečem; exportovaný `REVIEW.md` je v jazyce UI.
 
 ## Git operace
 
 Základní operace, abys review dokončil bez terminálu. Ve stejném repu může zároveň pracovat jiný agent, proto nic z toho nic nevynucuje:
 
-- **Commit (n):** otevře panel s necommitnutými soubory (staged, unstaged i nové). Odškrtni, co commitnout nechceš, napiš zprávu, Commit (Ctrl+Enter). Commitnou se jen zaškrtnuté soubory, jiné staged změny zůstanou staged. Když se od načtení panelu posunul HEAD (někdo mezitím commitnul), commit se odmítne.
+- **Commit (n):** otevře panel s necommitnutými soubory (staged, unstaged i nové). Odškrtni, co commitnout nechceš, napiš zprávu, Commit (Ctrl+Enter). Commitnou se jen zaškrtnuté soubory, jiné staged změny zůstanou staged. Když se při otevřeném panelu posune HEAD (někdo, třeba agent, mezitím commitnul), panel na to upozorní a Commit zůstane zablokovaný, dokud nepotvrdíš, že jsi soubory zkontroloval znovu; server navíc odmítne commit proti zastaralému HEAD.
 - **↶ Revert:** v commit panelu nebo v hlavičce diffu necommitnutého souboru. Po potvrzení zahodí jeho necommitnuté změny (nový soubor smaže).
 - **Push:** pushne aktuální větev; bez upstreamu vytvoří `origin/<větev>` a nastaví ji (`-u`). Nikdy force, odmítnutý push se nahlásí. `↑N ↓M` u větve ukazuje, co je k pushnutí a ke stažení (podle posledního fetche).
 - **Pull:** `git pull --ff-only`. Rozjetou větev nebo pull, který by přepsal necommitnuté soubory, git odmítne a hláška se zobrazí.

@@ -16,26 +16,26 @@
     <button id="btn-push" data-i18n-title="pushTitle" data-i18n="push">Push</button>
     <button id="btn-commit" data-i18n-title="commitTitle"><span data-i18n="commit">Commit</span> <span id="pending-count" class="badge">0</span></button>
   </div>
-  <label><span data-i18n="against">Against</span> <select id="opt-base"></select></label>
+  <label data-i18n-title="against"><span class="lbl" data-i18n="against">Against</span> <select id="opt-base"></select></label>
   <span id="base-behind" class="behind" hidden></span>
   <button id="btn-fetch" data-i18n-title="fetchTitle" data-i18n="fetch">Fetch</button>
-  <label data-i18n-title="leftTitle"><span data-i18n="left">Left</span>
+  <label data-i18n-title="leftTitle"><span class="lbl" data-i18n="left">Left</span>
     <select id="opt-left">
       <option value="mergebase" data-i18n="optMergebase">merge-base (like PR)</option>
       <option value="tip" data-i18n="optTip">tip of base branch</option>
     </select>
   </label>
-  <label data-i18n-title="rightTitle"><span data-i18n="right">Right</span>
+  <label data-i18n-title="rightTitle"><span class="lbl" data-i18n="right">Right</span>
     <select id="opt-right">
       <option value="worktree" data-i18n="optWorktree">working tree</option>
       <option value="head" data-i18n="optHead">HEAD (commits only)</option>
     </select>
   </label>
-  <label class="chk"><input type="checkbox" id="opt-ws"> <span data-i18n="ignoreWs">Ignore whitespace</span></label>
+  <label class="chk" data-i18n-title="ignoreWs"><input type="checkbox" id="opt-ws"> <span class="lbl-ws" data-i18n="ignoreWs">Ignore whitespace</span></label>
   <span class="spacer"></span>
   <button id="btn-comments" data-i18n-title="commentsTitle"><span data-i18n="comments">Comments</span> <span id="comment-count" class="badge">0</span></button>
-  <button id="btn-export" data-i18n-title="exportTitle">Export REVIEW.md</button>
-  <button id="btn-copy" data-i18n-title="copyTitle" data-i18n="copy">Copy</button>
+  <button id="btn-export" data-i18n-title="exportTitle">Export</button>
+  <button id="btn-copy" class="icon" data-i18n-title="copyTitle" aria-label="Copy">⧉</button>
   <div class="settings">
     <button id="btn-settings" data-i18n-title="settings" aria-haspopup="true" aria-expanded="false">⚙</button>
     <div id="settings-menu" hidden>
@@ -65,6 +65,9 @@
       <input id="set-font-custom" data-i18n-placeholder="fontCustomHint" spellcheck="false" autocomplete="off" hidden>
       <label><span data-i18n="fontSize">Font size</span>
         <span class="fsize"><button id="font-dec" type="button" aria-label="−">−</button><input id="set-size" type="number" min="9" max="24" step="0.5"><span>px</span><button id="font-inc" type="button" aria-label="+">+</button></span>
+      </label>
+      <label><span data-i18n="uiSize">UI size</span>
+        <span class="fsize"><button id="ui-dec" type="button" aria-label="−">−</button><input id="set-ui-size" type="number" min="10" max="20" step="0.5"><span>px</span><button id="ui-inc" type="button" aria-label="+">+</button></span>
       </label>
       <div id="app-version" class="app-version"></div>
       <div class="upd">
