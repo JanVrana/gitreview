@@ -38,6 +38,7 @@ type Server struct {
 	writing    sync.Mutex // one git write (fetch, commit, push, …) at a time
 	updater    Updater    // nil = no manual updates
 	updating   sync.Mutex
+	lastRevert *blockUndo // guarded by writing
 }
 
 // Options configure a Server.
@@ -84,6 +85,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/status", api(s.status))
 	mux.Handle("POST /api/commit", api(s.commit))
 	mux.Handle("POST /api/revert", api(s.revert))
+	mux.Handle("POST /api/revert-block", api(s.revertBlock))
+	mux.Handle("POST /api/revert-block/undo", api(s.undoRevertBlock))
 	mux.Handle("POST /api/push", api(s.push))
 	mux.Handle("POST /api/pull", api(s.pull))
 	mux.Handle("POST /api/stash", api(s.stashAction))
@@ -355,6 +358,9 @@ type diffSide struct {
 	side
 	Lines  []string `json:"lines"`
 	Exists bool     `json:"exists"`
+	// Hash of the working-tree file when single blocks can be reverted;
+	// the revert is refused if the file changed since.
+	Hash string `json:"hash,omitempty"`
 }
 
 // content loads one side of a file; a missing file is not an error.
@@ -374,70 +380,97 @@ func (s *Server) content(sd side, path string, wanted bool) (diffSide, []byte, e
 	return ds, data, nil
 }
 
-func (s *Server) diff(r *http.Request) (any, error) {
+// fileDiff is one file of the comparison with both sides loaded.
+type fileDiff struct {
+	c                   *compare
+	fc                  *git.FileChange
+	left, right         diffSide
+	leftData, rightData []byte
+	binary, tooLarge    bool
+	blocks              []diff.Block
+}
+
+// loadDiff loads a changed file and, unless it is binary or too large (and
+// not forced), splits it into blocks.
+func (s *Server) loadDiff(r *http.Request, path string, force bool) (*fileDiff, error) {
 	c, files, err := s.changed(r)
 	if err != nil {
 		return nil, err
 	}
-	path := r.URL.Query().Get("path")
 	// Only files that are part of the comparison may be read.
-	var fc *git.FileChange
-	for i := range files {
-		if files[i].Path == path {
-			fc = &files[i]
-			break
-		}
-	}
-	if fc == nil {
+	i := slices.IndexFunc(files, func(f git.FileChange) bool { return f.Path == path })
+	if i < 0 {
 		return nil, httpError{http.StatusNotFound, fmt.Errorf("file %q is not among the changed files", path)}
 	}
-	resp := map[string]any{"file": fc, "compare": c, "lang": lang.ForPath(fc.Path)}
+	fd := &fileDiff{c: c, fc: &files[i]}
+	fc := fd.fc
 	if fc.Binary {
-		resp["binary"] = true
-		return resp, nil
+		fd.binary = true
+		return fd, nil
 	}
-
 	oldPath := fc.Path
 	if fc.OldPath != "" {
 		oldPath = fc.OldPath
 	}
-	left, leftData, err := s.content(c.Left, oldPath, fc.Status != "A" && fc.Status != "U")
-	if err != nil {
+	if fd.left, fd.leftData, err = s.content(c.Left, oldPath, fc.Status != "A" && fc.Status != "U"); err != nil {
 		return nil, err
 	}
 	rightSide := c.Right
 	if fc.Src != "" {
 		rightSide.Rev = fc.Src
 	}
-	right, rightData, err := s.content(rightSide, fc.Path, fc.Status != "D")
-	if err != nil {
+	if fd.right, fd.rightData, err = s.content(rightSide, fc.Path, fc.Status != "D"); err != nil {
 		return nil, err
 	}
-	if git.IsBinary(leftData) || git.IsBinary(rightData) {
-		resp["binary"] = true
-		return resp, nil
+	if git.IsBinary(fd.leftData) || git.IsBinary(fd.rightData) {
+		fd.binary = true
+		return fd, nil
 	}
-	left.Lines, right.Lines = git.SplitLines(leftData), git.SplitLines(rightData)
+	fd.left.Lines, fd.right.Lines = git.SplitLines(fd.leftData), git.SplitLines(fd.rightData)
 
-	tooLarge := len(leftData) > git.MaxTextBytes || len(rightData) > git.MaxTextBytes ||
-		len(left.Lines) > maxLines || len(right.Lines) > maxLines
-	if tooLarge && r.URL.Query().Get("force") != "1" {
-		resp["tooLarge"] = true
-		resp["size"] = max(len(leftData), len(rightData))
-		return resp, nil
+	fd.tooLarge = len(fd.leftData) > git.MaxTextBytes || len(fd.rightData) > git.MaxTextBytes ||
+		len(fd.left.Lines) > maxLines || len(fd.right.Lines) > maxLines
+	if fd.tooLarge && !force {
+		return fd, nil
 	}
-
-	var blocks []diff.Block
-	if !left.Exists || !right.Exists {
-		blocks = diff.Whole(len(left.Lines), len(right.Lines))
+	if !fd.left.Exists || !fd.right.Exists {
+		fd.blocks = diff.Whole(len(fd.left.Lines), len(fd.right.Lines))
 	} else {
 		out, err := s.repo.Hunks(c.Left.Rev, c.Right.Rev, fc.OldPath, fc.Path, c.IgnoreW)
 		if err != nil {
 			return nil, err
 		}
-		blocks = diff.Blocks(diff.ParseHunks(out), len(left.Lines), len(right.Lines))
+		fd.blocks = diff.Blocks(diff.ParseHunks(out), len(fd.left.Lines), len(fd.right.Lines))
 	}
-	resp["left"], resp["right"], resp["blocks"] = left, right, blocks
+	return fd, nil
+}
+
+// blockRevertible tells whether single blocks can be reverted: the right
+// side is the working-tree file and the left side exists.
+func (fd *fileDiff) blockRevertible() bool {
+	return fd.c.Stash == nil && fd.c.Right.Rev == "" && fd.fc.Src == "" &&
+		fd.left.Exists && fd.right.Exists && !fd.binary && fd.fc.Status != "U"
+}
+
+func (s *Server) diff(r *http.Request) (any, error) {
+	q := r.URL.Query()
+	fd, err := s.loadDiff(r, q.Get("path"), q.Get("force") == "1")
+	if err != nil {
+		return nil, err
+	}
+	resp := map[string]any{"file": fd.fc, "compare": fd.c, "lang": lang.ForPath(fd.fc.Path)}
+	switch {
+	case fd.binary:
+		resp["binary"] = true
+	case fd.blocks == nil:
+		resp["tooLarge"] = true
+		resp["size"] = max(len(fd.leftData), len(fd.rightData))
+	default:
+		if fd.blockRevertible() {
+			fd.right.Hash = contentHash(fd.rightData)
+		}
+		resp["left"], resp["right"], resp["blocks"] = fd.left, fd.right, fd.blocks
+	}
 	return resp, nil
 }
 

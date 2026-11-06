@@ -309,7 +309,12 @@ td.code { overflow: hidden; white-space: pre; tab-size: 4; }
 td.code .ln { display: inline-block; padding-left: 6px; min-width: 100%; }
 td.code[data-s="l"] .ln { transform: translateX(var(--sxl)); }
 td.code[data-s="r"] .ln { transform: translateX(var(--sxr)); }
-td.mid { background: var(--panel-2); border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+td.mid { background: var(--panel-2); border-left: 1px solid var(--border); border-right: 1px solid var(--border); padding: 0; }
+td.mid .rb {
+  display: block; width: 100%; height: var(--row-h); padding: 0; border: 0; border-radius: 0;
+  background: none; color: var(--fg-strong); font: bold 0.9rem/1 sans-serif; cursor: pointer; opacity: .75;
+}
+td.mid .rb:hover { opacity: 1; background: var(--accent); color: #fff; }
 
 tr.k-mod td.code { background: var(--mod); }
 tr.k-add td.code { background: var(--add); }
@@ -375,6 +380,7 @@ tr.crow td.mid { padding: 0; background: var(--panel-2); }
   padding: 8px 16px; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.3); max-width: 80vw;
 }
 #toast.err { border-color: var(--c-stale); }
+#toast button { margin-left: 10px; }
 #measure { position: absolute; visibility: hidden; white-space: pre; top: -100px; }
 
 /* ---- highlight.js tokens ---------------------------------------------------- */

@@ -72,9 +72,16 @@ function compareParams(extra = {}) {
 }
 
 let toastTimer;
-function toast(text, isErr = false, ms = isErr ? 6000 : 3500) {
+/* action = { label, fn } adds a button (e.g. Undo) to the toast. */
+function toast(text, isErr = false, ms = isErr ? 6000 : 3500, action = null) {
   const t = $('#toast');
   t.textContent = text;
+  if (action) {
+    const b = document.createElement('button');
+    b.textContent = action.label;
+    b.onclick = () => { t.hidden = true; action.fn(); };
+    t.append(' ', b);
+  }
   t.className = isErr ? 'err' : '';
   t.hidden = false;
   clearTimeout(toastTimer);
@@ -366,7 +373,9 @@ function rowHtml(row) {
   if (row.first) cls += ' first';
   if (row.last) cls += ' last';
   const cs = row.first ? ` data-cs="${row.kind}" data-n="${row.size}"` : '';
-  return `<tr class="${cls}"${cs}>${cellsHtml('left', row.l)}<td class="mid"></td>${cellsHtml('right', row.r)}</tr>`;
+  const rb = row.first && state.diff.right.hash
+    ? `<button class="rb" data-rb="${row.block}" title="${esc(t('revertBlockTitle'))}">»</button>` : '';
+  return `<tr class="${cls}"${cs}>${cellsHtml('left', row.l)}<td class="mid">${rb}</td>${cellsHtml('right', row.r)}</tr>`;
 }
 
 function commentBoxHtml(c) {
@@ -1048,6 +1057,29 @@ async function revertFile(path) {
   await refresh();
 }
 
+/* » in the middle column: replace one block of the working-tree file with
+   the left side. The server refuses it when the file changed since it was
+   shown; the toast offers an undo. */
+async function revertBlock(bi) {
+  const d = state.diff;
+  const b = d && d.blocks[bi];
+  if (!b || !d.right.hash) return;
+  const block = { leftStart: b.leftStart, leftLen: b.leftLen, rightStart: b.rightStart, rightLen: b.rightLen };
+  try {
+    await api('/api/revert-block?' + compareParams(), { method: 'POST', json: { path: d.file.path, hash: d.right.hash, block } });
+    toast(t('blockReverted'), false, 10000, { label: t('undo'), fn: undoRevertBlock });
+  } catch (e) { toast(e.message, true, 10000); }
+  await refresh();
+}
+
+async function undoRevertBlock() {
+  try {
+    await api('/api/revert-block/undo', { method: 'POST' });
+    toast(t('blockRestored'));
+  } catch (e) { toast(e.message, true, 10000); }
+  await refresh();
+}
+
 async function stashAction(action) {
   const st = state.compare && state.compare.stash;
   state.confirm = null;
@@ -1463,6 +1495,8 @@ function bindUI() {
   const sc = $('#diff-scroll');
   let navPosQueued = false;
   sc.addEventListener('click', e => {
+    const rb = e.target.closest('button.rb');
+    if (rb) { rb.disabled = true; revertBlock(+rb.dataset.rb); return; }
     const num = e.target.closest('td.num[data-line]');
     if (num) { startComment(num.dataset.side, +num.dataset.line); return; }
     const fold = e.target.closest('tr.fold');
