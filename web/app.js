@@ -1201,6 +1201,26 @@ function applyTheme(theme) {
   LS.set('theme', theme);
 }
 
+/* Code font and size: the row height and line-number column scale with the size. */
+const FONT_SIZE = { min: 9, max: 24, def: 12.5 };
+function applyFont(family, size) {
+  family = (family || '').trim();
+  size = Math.min(FONT_SIZE.max, Math.max(FONT_SIZE.min, +size || FONT_SIZE.def));
+  const st = document.body.style;
+  // a generic family (monospace) must stay unquoted, a font name is quoted
+  if (family) st.setProperty('--code-font', `${family === 'monospace' ? family : JSON.stringify(family)}, monospace`);
+  else st.removeProperty('--code-font');
+  st.setProperty('--code-size', size + 'px');
+  st.setProperty('--row-h', Math.round(size * 1.52) + 'px');
+  st.setProperty('--num-w', Math.round(size * 4.2) + 'px');
+  $('#set-font').value = family;
+  $('#set-size').value = size;
+  LS.set('font', family);
+  LS.set('fontSize', size);
+  measureChar();
+  if (state.diff) renderDiff();
+}
+
 /* Switches the UI language and redraws everything that holds text. */
 function applyLang(l) {
   uiLang = I18N[l] ? l : 'en';
@@ -1235,11 +1255,24 @@ async function changeOpts() {
 function bindUI() {
   ['#opt-base', '#opt-left', '#opt-right', '#opt-ws'].forEach(s => $(s).addEventListener('change', changeOpts));
   const menu = $('#settings-menu'), gear = $('#btn-settings');
-  const showMenu = open => { menu.hidden = !open; gear.setAttribute('aria-expanded', String(open)); };
+  const showMenu = open => {
+    menu.hidden = !open;
+    gear.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    // opens to the left of the gear; when the toolbar wraps the gear can sit near the left edge
+    const fitsLeft = gear.getBoundingClientRect().right >= menu.offsetWidth + 8;
+    menu.style.right = fitsLeft ? '' : 'auto';
+    menu.style.left = fitsLeft ? '' : '0';
+  };
   gear.onclick = e => { e.stopPropagation(); showMenu(menu.hidden); };
   document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.settings')) showMenu(false); });
   $('#set-theme').addEventListener('change', e => applyTheme(e.target.value));
   $('#set-lang').addEventListener('change', e => applyLang(e.target.value));
+  $('#set-font').addEventListener('change', e => applyFont(e.target.value, $('#set-size').value));
+  $('#set-size').addEventListener('change', e => applyFont($('#set-font').value, e.target.value));
+  const stepFont = d => applyFont($('#set-font').value, (+$('#set-size').value || FONT_SIZE.def) + d);
+  $('#font-dec').onclick = () => stepFont(-0.5);
+  $('#font-inc').onclick = () => stepFont(0.5);
   $('#btn-export').onclick = EXPORT_ACTIONS.export;
   $('#btn-fetch').onclick = fetchRemote;
   $('#btn-push').onclick = e => gitOp(e.currentTarget, '/api/push', {}, pushDone);
@@ -1443,7 +1476,7 @@ async function init() {
   applyStaticTexts();
   const sw = LS.get('sidebarW', null);
   if (sw) document.body.style.setProperty('--sidebar-w', sw);
-  measureChar();
+  applyFont(LS.get('font', ''), LS.get('fontSize', FONT_SIZE.def));
   bindUI();
   try {
     await loadInfo();

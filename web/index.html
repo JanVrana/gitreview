@@ -51,6 +51,17 @@
           <option value="cs">Čeština</option>
         </select>
       </label>
+      <label><span data-i18n="codeFont">Code font</span>
+        <input id="set-font" list="font-list" data-i18n-placeholder="fontDefault" spellcheck="false" autocomplete="off">
+        <datalist id="font-list">
+          <option value="JetBrains Mono"><option value="Fira Code"><option value="Source Code Pro">
+          <option value="Cascadia Code"><option value="Ubuntu Mono"><option value="DejaVu Sans Mono">
+          <option value="Hack"><option value="Consolas"><option value="Menlo"><option value="monospace">
+        </datalist>
+      </label>
+      <label><span data-i18n="fontSize">Font size</span>
+        <span class="fsize"><button id="font-dec" type="button" aria-label="−">−</button><input id="set-size" type="number" min="9" max="24" step="0.5"><span>px</span><button id="font-inc" type="button" aria-label="+">+</button></span>
+      </label>
       <div id="app-version" class="app-version"></div>
       <div class="upd">
         <button id="btn-check-update" data-i18n="checkUpdate">Check for updates</button>

@@ -62,10 +62,12 @@ body {
   font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   display: flex; flex-direction: column; overflow: hidden;
   --num-w: 52px; --mid-w: 14px; --row-h: 19px; --sidebar-w: 320px;
+  --code-font: "JetBrains Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --code-size: 12.5px;
 }
 .mono, .diff, .cbox pre, textarea {
-  font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  font-size: 12.5px;
+  font-family: var(--code-font);
+  font-size: var(--code-size);
 }
 button, select, input { font: inherit; color: inherit; }
 button, select {
@@ -103,7 +105,11 @@ button.danger { color: var(--c-stale); }
   box-shadow: 0 8px 30px rgba(0,0,0,.35);
 }
 #settings-menu[hidden] { display: none; }
-#settings-menu label { justify-content: space-between; gap: 12px; }
+#settings-menu label { justify-content: space-between; gap: 12px; white-space: nowrap; }
+#set-font { width: 150px; }
+.fsize { display: inline-flex; align-items: center; gap: 4px; }
+.fsize button { padding: 0 7px; }
+#set-size { width: 52px; text-align: right; }
 .app-version { color: var(--fg-dim); font-size: 11px; border-top: 1px solid var(--border); padding-top: 8px; }
 #live { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-dim); }
 #live.on { background: #5fb760; }
