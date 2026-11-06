@@ -1,4 +1,5 @@
-// Package git wraps the git CLI for read-only inspection of a repository.
+// Package git wraps the git CLI for inspecting a repository. The only
+// writes are fetching and fast-forwarding base branches (remote.go).
 //
 // Every call runs without a shell, with --no-optional-locks (polling never
 // takes the index lock while another process such as Claude Code commits in
@@ -50,7 +51,11 @@ func Open(path string) (*Repo, error) {
 }
 
 func (r *Repo) run(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	return r.runTimeout(cmdTimeout, args...)
+}
+
+func (r *Repo) runTimeout(timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	base := []string{
 		"-C", r.Root,
@@ -60,6 +65,7 @@ func (r *Repo) run(args ...string) ([]byte, error) {
 	}
 	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	detach(cmd) // no controlling terminal: ssh cannot prompt for a passphrase and hang
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -87,7 +93,7 @@ func (r *Repo) Verify(ref string) (string, error) {
 	}
 	out, err := r.run("rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
 	if err != nil {
-		return "", fmt.Errorf("ref %q neexistuje", ref)
+		return "", fmt.Errorf("ref %q does not exist", ref)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

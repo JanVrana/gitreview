@@ -61,13 +61,13 @@ function compareParams(extra = {}) {
 }
 
 let toastTimer;
-function toast(text, isErr = false) {
+function toast(text, isErr = false, ms = isErr ? 6000 : 3500) {
   const t = $('#toast');
   t.textContent = text;
   t.className = isErr ? 'err' : '';
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, isErr ? 6000 : 3500);
+  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
 function fmtSize(n) {
@@ -718,15 +718,53 @@ function renderToolbar() {
   const sel = $('#opt-base');
   const main = info.bases.map(b =>
     `<option value="${esc(b.name)}"${b.exists ? '' : ' disabled'}>${esc(b.name)}` +
-    `${b.exists ? (b.ref !== b.name ? ` (${esc(b.ref)})` : '') : ` – ${t('notExists')}`}</option>`).join('');
+    `${b.exists ? (b.ref !== b.name ? ` (${esc(b.ref)})` : '') : ` – ${t('notExists')}`}` +
+    `${b.behind ? ` ↓${b.behind}` : ''}</option>`).join('');
   const others = info.branches.filter(b => !info.bases.some(x => x.name === b || x.ref === b));
   sel.innerHTML = main + (others.length
     ? `<optgroup label="${t('otherBranches')}">${others.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`
     : '');
   sel.value = state.opts.base;
+  renderBehind();
   $('#opt-left').value = state.opts.left;
   $('#opt-right').value = state.opts.right;
   $('#opt-ws').checked = state.opts.ws;
+}
+
+/* Badge next to the base selector when the local base branch is behind its
+   remote-tracking branch (as of the last fetch). */
+function renderBehind() {
+  const el = $('#base-behind');
+  const b = state.info && state.info.bases.find(x => x.name === state.opts.base);
+  el.hidden = !(b && b.behind);
+  if (el.hidden) return;
+  el.textContent = (b.ahead ? `↑${b.ahead} ` : '') + `↓${b.behind}`;
+  el.title = t('behindTitle', b.name, b.upstream, b.behind, b.ahead);
+}
+
+/* Fetches all remotes and fast-forwards the local base branches. */
+async function fetchRemote() {
+  const btn = $('#btn-fetch');
+  btn.disabled = true;
+  btn.textContent = t('fetching');
+  try {
+    const r = await api('/api/fetch', { method: 'POST', json: { base: state.opts.base } });
+    const msgs = [], warn = [];
+    for (const u of r.branches) {
+      if (u.status === 'updated') msgs.push(t('ffUpdated', u.branch, u.commits, u.upstream));
+      else if (u.status === 'uptodate') msgs.push(t('ffUptodate', u.branch));
+      else if (u.status === 'diverged') warn.push(t('ffDiverged', u.branch, u.ahead, u.upstream));
+      else if (u.status === 'checkedout') warn.push(t('ffCheckedout', u.branch));
+    }
+    const all = [...msgs, ...warn];
+    toast(`${t('fetched')} ${all.length ? all.join(' · ') : t('nothingToUpdate')}`, warn.length > 0, 9000);
+    await refresh();
+  } catch (e) {
+    toast(e.message, true, 10000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('fetch');
+  }
 }
 
 function viewedMap() { return state.info ? LS.get('viewed:' + state.info.root, {}) : {}; }
@@ -937,6 +975,7 @@ function applyLang(l) {
 async function changeOpts() {
   const o = state.opts;
   o.base = $('#opt-base').value;
+  renderBehind();
   o.left = $('#opt-left').value;
   o.right = $('#opt-right').value;
   o.ws = $('#opt-ws').checked;
@@ -957,6 +996,7 @@ function bindUI() {
   $('#set-theme').addEventListener('change', e => applyTheme(e.target.value));
   $('#set-lang').addEventListener('change', e => applyLang(e.target.value));
   $('#btn-export').onclick = EXPORT_ACTIONS.export;
+  $('#btn-fetch').onclick = fetchRemote;
   $('#btn-copy').onclick = EXPORT_ACTIONS.copy;
   $('#btn-comments').onclick = () => {
     const p = $('#comments-panel');

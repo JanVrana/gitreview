@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -32,6 +34,7 @@ type Server struct {
 	allowHosts map[string]bool
 	auth       *tokenAuth // nil = no authentication
 	watch      *watcher
+	fetching   sync.Mutex // one fetch at a time
 }
 
 // Options configure a Server.
@@ -69,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/comments", api(s.commentUpdate))
 	mux.Handle("DELETE /api/comments", api(s.commentDelete))
 	mux.Handle("POST /api/export", api(s.export))
+	mux.Handle("POST /api/fetch", api(s.fetch))
 	static := http.FileServerFS(s.web)
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
@@ -248,13 +252,28 @@ type baseInfo struct {
 	Name   string `json:"name"`
 	Ref    string `json:"ref,omitempty"`
 	Exists bool   `json:"exists"`
+	// Local branch compared with its remote-tracking branch as of the last
+	// fetch (no network access here).
+	Upstream string `json:"upstream,omitempty"`
+	Ahead    int    `json:"ahead,omitempty"`
+	Behind   int    `json:"behind,omitempty"`
 }
+
+// baseNames are the branches offered as comparison bases and kept up to
+// date by fetch.
+var baseNames = []string{"develop", "master", "main"}
 
 func (s *Server) info(*http.Request) (any, error) {
 	var bases []baseInfo
-	for _, n := range []string{"develop", "master", "main"} {
+	for _, n := range baseNames {
 		ref, err := s.repo.ResolveBase(n)
-		bases = append(bases, baseInfo{Name: n, Ref: ref, Exists: err == nil})
+		b := baseInfo{Name: n, Ref: ref, Exists: err == nil}
+		if b.Exists && ref == n { // a local branch: how far is it from the remote?
+			if b.Upstream = s.repo.Upstream(n); b.Upstream != "" {
+				b.Ahead, b.Behind, _ = s.repo.AheadBehind(n, b.Upstream)
+			}
+		}
+		bases = append(bases, b)
 	}
 	return map[string]any{
 		"root":     s.repo.Root,
@@ -472,4 +491,38 @@ func oneLine(s string) string {
 		cut--
 	}
 	return s[:cut]
+}
+
+// fetch runs `git fetch --all --prune` and fast-forwards the local base
+// branches (and the selected base, if it is another local branch) to their
+// remote-tracking branches. Branches with local commits or checked out in a
+// worktree are left alone and reported.
+func (s *Server) fetch(r *http.Request) (any, error) {
+	var body struct{ Base string }
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if !s.fetching.TryLock() {
+		return nil, httpError{http.StatusConflict, errors.New("a fetch is already running")}
+	}
+	defer s.fetching.Unlock()
+	if err := s.repo.Fetch(); err != nil {
+		return nil, httpError{http.StatusBadGateway, err}
+	}
+	names := baseNames
+	if body.Base != "" && !slices.Contains(names, body.Base) {
+		names = append(slices.Clone(names), body.Base)
+	}
+	updates := []git.BranchUpdate{}
+	for _, n := range names {
+		if !s.repo.LocalBranch(n) {
+			continue // remote-only bases (origin/x) are already current after the fetch
+		}
+		u, err := s.repo.FastForward(n)
+		if err != nil {
+			return nil, err
+		}
+		updates = append(updates, u)
+	}
+	return map[string]any{"branches": updates}, nil
 }

@@ -92,6 +92,8 @@ button.danger { color: var(--c-stale); }
   background: var(--border); color: var(--fg-strong); font-size: 11px; text-align: center;
 }
 .badge.has { background: var(--c-border); color: #000; }
+.behind { color: var(--hl-meta); font-size: 12px; cursor: help; margin-left: -8px; }
+#btn-fetch:disabled { opacity: .6; cursor: progress; }
 .settings { position: relative; }
 #btn-settings { font-size: 15px; line-height: 1; padding: 3px 7px; }
 #settings-menu {

@@ -92,7 +92,7 @@ Další ochrany, aktivní i s `-no-auth`:
 - Zápisy (komentáře, export) přijímá jen jako JSON ze stejného originu. Cizí web otevřený v prohlížeči tak nemůže podstrčit text do REVIEW.md.
 - Přístup přes doménové jméno je kvůli DNS rebindingu povolený jen pro IP adresy, `localhost` a hostname stroje. Další jména povolíš přes `-allow-host vm.firma.cz,dev-vm`.
 - Číst lze jen soubory ze seznamu změn.
-- Do repozitáře server jen čte, zapisuje pouze `REVIEW.md` a `.git/gitreview/comments.json`.
+- Pracovní kopie ani checkoutnuté větve se server nedotkne. Zapisuje jen `REVIEW.md`, `.git/gitreview/comments.json` a při **Fetch** remote-tracking větve a fast-forward lokálních base větví.
 
 ## Co umí
 
@@ -101,6 +101,7 @@ Další ochrany, aktivní i s `-no-auth`:
   - vlevo *merge-base* (jako PR) nebo *špička base*,
   - vpravo *pracovní kopie* (včetně necommitnutých a nových souborů) nebo *HEAD*,
   - přepínač *Ignorovat mezery*.
+- **Fetch:** spustí `git fetch --all --prune` a fast-forwardne lokální `develop` / `master` / `main` (a zvolenou base) na stav z remote, takže porovnáváš proti aktuální podobě větve na remote, ne proti staré lokální kopii. Větev s lokálními commity nebo právě checkoutnutou nechá být a nahlásí to. Když je lokální base pozadu za remote (podle posledního fetche), ukáže se u výběru větve `↓N`. Fetch potřebuje neinteraktivní přihlášení (ssh agent, credential helper), na heslo se nikdy neptá.
 - **Seznam souborů:** strom souborů s barvami stavů jako v IntelliJ, počty +/− a checkbox „zkontrolováno“. Ten se sám zruší, když se soubor znovu změní.
 - **Diff:**
   - zarovnané bloky změn se zvýrazněním změněných slov a zvýrazněním syntaxe (highlight.js),

@@ -103,7 +103,7 @@ Further protections, also active with `-no-auth`:
 - Writes (comments, export) are accepted only as same-origin JSON requests, so a foreign web page open in your browser cannot inject text into `REVIEW.md`.
 - To prevent DNS rebinding, the `Host` header must be an IP address, `localhost` or the machine's hostname. Allow other names with `-allow-host vm.example.com,dev-vm`.
 - Only files from the list of changed files can be read.
-- The server is read-only for the repository. It writes only `REVIEW.md` and `.git/gitreview/comments.json`.
+- The server does not touch your working tree or the checked-out branch. It writes only `REVIEW.md`, `.git/gitreview/comments.json` and, on **Fetch**, remote-tracking branches and fast-forwards of local base branches.
 
 ## Features
 
@@ -112,6 +112,7 @@ Further protections, also active with `-no-auth`:
   - left side: *merge-base* (like a pull request) or the *tip of the base branch*,
   - right side: *working tree* (including uncommitted and untracked files) or *HEAD*,
   - an *ignore whitespace* toggle.
+- **Fetch:** runs `git fetch --all --prune` and fast-forwards the local `develop` / `master` / `main` (and the selected base) to their remote-tracking branches, so you compare against the current remote state, not a stale local copy. A branch with local commits or one that is checked out is left alone and reported. When the local base is behind its remote (as of the last fetch), `↓N` appears next to the base selector. Fetch needs non-interactive credentials (ssh agent, credential helper); it never prompts.
 - **File tree:** IntelliJ-style status colors, +/− line counts and a "reviewed" checkbox that clears itself when the file changes again.
 - **Diff:**
   - aligned change blocks with similar lines paired, changed words highlighted and syntax highlighting (highlight.js),

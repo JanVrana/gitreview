@@ -262,3 +262,49 @@ func TestTokenAuth(t *testing.T) {
 		t.Errorf("api with token query: %d", code)
 	}
 }
+
+func TestFetchEndpoint(t *testing.T) {
+	ts, dir := newTest(t)
+	// a remote whose develop is one commit ahead of the local develop
+	origin := t.TempDir()
+	testrepo.Git(t, origin, "clone", "-q", "--bare", dir, ".")
+	work := t.TempDir()
+	testrepo.Git(t, work, "clone", "-q", "-b", "develop", origin, ".")
+	testrepo.Write(t, work, "upstream.txt", "new\n")
+	testrepo.Git(t, work, "add", "-A")
+	testrepo.Git(t, work, "commit", "-q", "-m", "upstream work")
+	testrepo.Git(t, work, "push", "-q", "origin", "develop")
+	testrepo.Git(t, dir, "remote", "add", "origin", origin)
+	testrepo.Git(t, dir, "fetch", "-q", "origin", "master") // only master is known locally
+
+	res, err := http.Post(ts.URL+"/api/fetch", "application/json", strings.NewReader(`{"base":"develop"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out struct{ Branches []git.BranchUpdate }
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil || res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, err %v", res.StatusCode, err)
+	}
+	got := map[string]git.BranchUpdate{}
+	for _, b := range out.Branches {
+		got[b.Branch] = b
+	}
+	if d := got["develop"]; d.Status != git.Updated || d.Commits != 1 || d.Upstream != "origin/develop" {
+		t.Errorf("develop: %+v", d)
+	}
+	if m := got["master"]; m.Status != git.UpToDate {
+		t.Errorf("master: %+v", m)
+	}
+	if _, ok := got["main"]; ok {
+		t.Error("main does not exist locally and must not be reported")
+	}
+
+	var info struct{ Bases []baseInfo }
+	get(t, ts, "/api/info", &info)
+	for _, b := range info.Bases {
+		if b.Name == "develop" && (b.Upstream != "origin/develop" || b.Behind != 0) {
+			t.Errorf("info after fetch: %+v", b)
+		}
+	}
+}
