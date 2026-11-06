@@ -54,6 +54,14 @@ With Go 1.26 or newer:
 go install github.com/JanVrana/gitreview@latest
 ```
 
+Go puts the binary into `$(go env GOBIN)`, or `$(go env GOPATH)/bin` when `GOBIN` is not set. That is usually `~/go/bin/gitreview`, and `~/go/bin` is often not on `PATH`. Run it by its full path, or add the directory to `PATH`:
+
+```bash
+~/go/bin/gitreview -version                                   # run directly
+echo 'export PATH="$(go env GOPATH)/bin:$PATH"' >> ~/.bashrc  # or add to PATH (zsh: ~/.zshrc)
+source ~/.bashrc && gitreview -version
+```
+
 From source: `git clone https://github.com/JanVrana/gitreview && cd gitreview && make build`.
 
 To update, run the same command again.

@@ -52,6 +52,14 @@ S nainstalovaným Go (1.26+):
 go install github.com/JanVrana/gitreview@latest
 ```
 
+Go uloží binárku do `$(go env GOBIN)`, a když `GOBIN` není nastavené, do `$(go env GOPATH)/bin`. Obvykle je to `~/go/bin/gitreview` a `~/go/bin` často není v `PATH`. Spusť ji celou cestou, nebo adresář přidej do `PATH`:
+
+```bash
+~/go/bin/gitreview -version                                   # přímé spuštění
+echo 'export PATH="$(go env GOPATH)/bin:$PATH"' >> ~/.bashrc  # nebo přidání do PATH (zsh: ~/.zshrc)
+source ~/.bashrc && gitreview -version
+```
+
 Ze zdrojáků: `git clone https://github.com/JanVrana/gitreview && cd gitreview && make build`.
 
 Aktualizace = znovu spustit stejný příkaz.
