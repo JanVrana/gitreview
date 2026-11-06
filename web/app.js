@@ -30,6 +30,7 @@ const state = {
   forced: null,         // path for which "show anyway" was chosen
   comments: [],
   expanded: new Set(),  // equal-block indexes expanded by the user
+  expandAll: LS.get('expandAll', false), // show whole files, no folds
   collapsedDirs: new Set(),
   seen: {},             // path -> sig when last opened
   editing: null,        // {side, line} for new comment or {id} for edit
@@ -287,7 +288,7 @@ function buildRows(d, cm) {
     if (b.type === 'equal') {
       const n = b.leftLen;
       const vis = new Array(n).fill(false);
-      if (state.expanded.has(bi) || n < MIN_FOLD + 2 * CTX) vis.fill(true);
+      if (state.expandAll || state.expanded.has(bi) || n < MIN_FOLD + 2 * CTX) vis.fill(true);
       else {
         const atStart = bi === 0, atEnd = bi === d.blocks.length - 1;
         for (let k = 0; k < n; k++) {
@@ -422,7 +423,12 @@ function renderHeader() {
       `<div class="pad-mid"></div><div class="side">${r}</div></div>`;
   }
   h.innerHTML = `<div class="dh-path"><span class="st st-${f.status}">${statusName(f.status)}</span>` +
-    `<span>${esc(f.path)}</span>${old}<span class="hint">${t('hint')}</span></div>${sides}`;
+    `<span>${esc(f.path)}</span>${old}<span class="hint">${t('hint')}</span>` +
+    `<span class="dh-nav"><button data-nav="prev" title="${esc(t('prevChange'))}">↑</button>` +
+    `<span id="nav-pos" class="nav-pos"></span>` +
+    `<button data-nav="next" title="${esc(t('nextChange'))}">↓</button>` +
+    `<button data-nav="expand" class="${state.expandAll ? 'on' : ''}" title="${esc(t(state.expandAll ? 'collapseTitle' : 'expandTitle'))}">` +
+    `${t(state.expandAll ? 'collapseAll' : 'expandAll')}</button></span></div>${sides}`;
 }
 
 function renderDiff({ keepScroll = true } = {}) {
@@ -448,6 +454,7 @@ function renderDiff({ keepScroll = true } = {}) {
   bindEditor();
   updateHScroll();
   renderRuler();
+  updateNavPos();
 }
 
 // ---- horizontal scrolling (each side scrolls independently) -----------------------
@@ -527,6 +534,43 @@ function scrollToRow(tr) {
   tr.classList.add('flash');
 }
 
+function changeMarks() { return [...$('#diff-scroll').querySelectorAll('tr[data-cs]')]; }
+
+// index of the change at the reading position (a third of the viewport)
+function currentChange(marks) {
+  if (nav.idx != null && nav.idx < marks.length) return nav.idx;
+  const sc = $('#diff-scroll');
+  const anchor = sc.scrollTop + sc.clientHeight / 3;
+  return marks.findLastIndex(tr => tr.offsetTop <= anchor + 2);
+}
+
+// "3 / 12" next to the ↑ ↓ buttons
+function updateNavPos() {
+  const el = $('#nav-pos');
+  if (!el) return;
+  const marks = changeMarks();
+  if (!marks.length) { el.textContent = ''; return; }
+  const i = currentChange(marks);
+  el.textContent = `${i < 0 ? '–' : i + 1} / ${marks.length}`;
+  el.title = t('changesCount', marks.length);
+}
+
+/* Toggles whole-file view. The change at the reading position stays put on
+   screen even though rows are inserted (or removed) above it. */
+function toggleExpandAll() {
+  const sc = $('#diff-scroll');
+  const marks = changeMarks();
+  const i = Math.max(0, currentChange(marks));
+  const offset = marks.length ? marks[i].offsetTop - sc.scrollTop : 0;
+  state.expandAll = !state.expandAll;
+  LS.set('expandAll', state.expandAll);
+  if (!state.expandAll) state.expanded.clear();
+  renderDiff();
+  const after = changeMarks();
+  if (after[i]) { sc.scrollTop = after[i].offsetTop - offset; nav.expectTop = sc.scrollTop; }
+  updateNavPos();
+}
+
 function gotoChange(dir) {
   const sc = $('#diff-scroll');
   const marks = [...sc.querySelectorAll('tr[data-cs]')];
@@ -543,6 +587,7 @@ function gotoChange(dir) {
   if (next < 0 || next >= marks.length) { gotoFile(dir, dir > 0 ? 'first' : 'last'); return; }
   nav.idx = next;
   scrollToRow(marks[next]);
+  updateNavPos();
 }
 
 function gotoFile(dir, landOn) {
@@ -557,6 +602,7 @@ function scrollToChange(which = 'first') {
   if (!marks.length) { nav.idx = null; return; }
   nav.idx = which === 'last' ? marks.length - 1 : 0;
   scrollToRow(marks[nav.idx]);
+  updateNavPos();
 }
 
 function scrollToLine(side, line) {
@@ -1075,6 +1121,7 @@ function bindUI() {
   });
 
   const sc = $('#diff-scroll');
+  let navPosQueued = false;
   sc.addEventListener('click', e => {
     const num = e.target.closest('td.num[data-line]');
     if (num) { startComment(num.dataset.side, +num.dataset.line); return; }
@@ -1100,6 +1147,16 @@ function bindUI() {
   });
   sc.addEventListener('scroll', () => {
     if (Math.abs(sc.scrollTop - nav.expectTop) > 2) nav.idx = null; // user scrolled manually
+    if (!navPosQueued) {
+      navPosQueued = true;
+      requestAnimationFrame(() => { navPosQueued = false; updateNavPos(); });
+    }
+  });
+  $('#diff-header').addEventListener('click', e => {
+    const b = e.target.closest('button[data-nav]');
+    if (!b) return;
+    if (b.dataset.nav === 'expand') toggleExpandAll();
+    else gotoChange(b.dataset.nav === 'next' ? 1 : -1);
   });
   sc.addEventListener('wheel', e => {
     const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);

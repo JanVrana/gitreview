@@ -121,7 +121,8 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
 - **Seznam souborů:** strom souborů s barvami stavů jako v IntelliJ, počty +/− a checkbox „zkontrolováno“. Ten se sám zruší, když se soubor znovu změní.
 - **Diff:**
   - zarovnané bloky změn se zvýrazněním změněných slov a zvýrazněním syntaxe (highlight.js),
-  - sbalené nezměněné úseky,
+  - sbalené nezměněné úseky; tlačítko **⇕ Celý soubor** rozbalí celý soubor (volba se pamatuje),
+  - tlačítka **↑ / ↓** s počítadlem změn (3 / 12) pro skoky mezi změnami,
   - přehledová lišta změn vpravo,
   - nezávislý horizontální scroll stran.
 - **Auto-refresh:** když Claude změní soubor, commitne nebo přepne větev, UI se samo obnoví (polling ~1,5 s přes SSE).

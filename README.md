@@ -132,7 +132,8 @@ Further protections, also active with `-no-auth`:
 - **File tree:** IntelliJ-style status colors, +/− line counts and a "reviewed" checkbox that clears itself when the file changes again.
 - **Diff:**
   - aligned change blocks with similar lines paired, changed words highlighted and syntax highlighting (highlight.js),
-  - folded unchanged regions,
+  - folded unchanged regions; the **⇕ Whole file** button expands the whole file (remembered),
+  - **↑ / ↓** buttons with a change counter (3 / 12) to jump between changes,
   - a change overview ruler on the right,
   - independent horizontal scrolling of each side.
 - **Auto-refresh:** when files change, a commit is made or the branch is switched, the UI reloads by itself (polling about every 1.5 s, pushed over SSE).

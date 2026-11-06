@@ -151,9 +151,13 @@ button.danger { color: var(--c-stale); }
 
 /* ---- diff header ---------------------------------------------------------- */
 #diff-header { border-bottom: 1px solid var(--border); background: var(--panel); }
-.dh-path { padding: 5px 10px; display: flex; gap: 10px; align-items: baseline; color: var(--fg-strong); }
+.dh-path { padding: 5px 10px; display: flex; gap: 10px; align-items: center; color: var(--fg-strong); }
 .dh-path .old { color: var(--fg-dim); }
 .dh-path .hint { margin-left: auto; color: var(--fg-dim); font-size: 11px; }
+.dh-nav { display: flex; gap: 4px; align-items: center; flex: none; }
+.dh-nav button { padding: 0 8px; font-size: 12px; line-height: 20px; }
+.dh-nav button.on { border-color: var(--accent); color: var(--fg-strong); }
+.nav-pos { min-width: 52px; text-align: center; color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
 .cols { display: flex; }
 .cols .pad-num { width: var(--num-w); flex: none; }
 .cols .pad-mid { width: calc(var(--mid-w) + var(--num-w)); flex: none; }
