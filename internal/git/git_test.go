@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitreview/internal/diff"
-	"gitreview/internal/testrepo"
+	"github.com/JanVrana/gitreview/internal/diff"
+	"github.com/JanVrana/gitreview/internal/testrepo"
 )
 
 func files(t *testing.T, r *Repo, left, right string) map[string]FileChange {

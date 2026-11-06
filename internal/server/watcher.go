@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"gitreview/internal/git"
+	"github.com/JanVrana/gitreview/internal/git"
 )
 
 const (

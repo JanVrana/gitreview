@@ -11,8 +11,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"gitreview/internal/git"
-	"gitreview/internal/testrepo"
+	"github.com/JanVrana/gitreview/internal/git"
+	"github.com/JanVrana/gitreview/internal/testrepo"
 )
 
 func newTest(t *testing.T) (*httptest.Server, string) {

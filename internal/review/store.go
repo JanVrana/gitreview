@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"gitreview/internal/lang"
+	"github.com/JanVrana/gitreview/internal/lang"
 )
 
 // Comment is anchored by file, side and line plus the line's text at the

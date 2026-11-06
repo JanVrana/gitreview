@@ -4,13 +4,36 @@ Webový nástroj pro review změn aktuální git větve proti `develop` / `maste
 
 Výsledkem je jedna Go binárka bez závislostí, frontend je v ní zabudovaný (offline, žádné CDN).
 
+## Instalace
+
+Hotová binárka pro Linux / macOS (amd64, arm64) do `~/.local/bin`:
+
+```bash
+mkdir -p ~/.local/bin && curl -fL -o ~/.local/bin/gitreview \
+  "https://github.com/JanVrana/gitreview/releases/latest/download/gitreview-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
+  && chmod +x ~/.local/bin/gitreview && gitreview -version
+```
+
+Pokud `~/.local/bin` nemáš v `PATH`, dej binárku jinam (např. `sudo` do `/usr/local/bin`). Kontrolní součty jsou v `SHA256SUMS` u každého releasu.
+
+S nainstalovaným Go (1.26+):
+
+```bash
+go install github.com/JanVrana/gitreview@latest
+```
+
+Ze zdrojáků: `git clone https://github.com/JanVrana/gitreview && cd gitreview && make build`.
+
+Aktualizace = znovu spustit stejný příkaz.
+
 ## Spuštění
 
 ```bash
-make build
-./gitreview /cesta/k/repu          # výchozí: aktuální adresář, port 8765, 0.0.0.0
-./gitreview -p 9000 -b 127.0.0.1 .
+gitreview /cesta/k/repu          # výchozí: aktuální adresář, port 8765, 0.0.0.0
+gitreview -p 9000 -b 127.0.0.1 .
 ```
+
+Potřebuje jen `git` v `PATH`.
 
 Při startu se vypíšou URL (IP adresy VM).
 
@@ -55,6 +78,7 @@ Při startu se vypíšou URL (IP adresy VM).
 ```bash
 make test   # go test ./...
 make vet
+make dist   # release binárky do dist/ (gitreview-<os>-<arch> + SHA256SUMS)
 ```
 
 Struktura:

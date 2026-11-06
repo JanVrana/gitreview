@@ -16,10 +16,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"gitreview/internal/diff"
-	"gitreview/internal/git"
-	"gitreview/internal/lang"
-	"gitreview/internal/review"
+	"github.com/JanVrana/gitreview/internal/diff"
+	"github.com/JanVrana/gitreview/internal/git"
+	"github.com/JanVrana/gitreview/internal/lang"
+	"github.com/JanVrana/gitreview/internal/review"
 )
 
 const maxLines = 20000 // larger files need explicit "show anyway"

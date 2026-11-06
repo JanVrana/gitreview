@@ -10,16 +10,31 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
-	"gitreview/internal/git"
-	"gitreview/internal/server"
+	"github.com/JanVrana/gitreview/internal/git"
+	"github.com/JanVrana/gitreview/internal/server"
 )
 
 //go:embed web
 var webFiles embed.FS
+
+// version is set at release build time via -ldflags "-X main.version=…".
+var version = "dev"
+
+// buildVersion returns the release version, or the module version for
+// binaries built with `go install …@vX`.
+func buildVersion() string {
+	if version == "dev" {
+		if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			return bi.Main.Version
+		}
+	}
+	return version
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -32,11 +47,16 @@ func run() error {
 	port := flag.Int("p", 8765, "port")
 	bind := flag.String("b", "0.0.0.0", "adresa, na které server poslouchá")
 	allow := flag.String("allow-host", "", "další povolené názvy hostitele oddělené čárkou (IP adresy, localhost a hostname stroje jsou povolené vždy)")
+	showVersion := flag.Bool("version", false, "vypíše verzi a skončí")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Použití: %s [-p port] [-b adresa] [-allow-host jméno,…] [cesta k repozitáři]\n\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("gitreview", buildVersion())
+		return nil
+	}
 
 	dir := "."
 	if flag.NArg() > 0 {
