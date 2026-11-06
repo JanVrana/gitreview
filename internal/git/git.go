@@ -1,5 +1,6 @@
-// Package git wraps the git CLI for inspecting a repository. The only
-// writes are fetching and fast-forwarding base branches (remote.go).
+// Package git wraps the git CLI. Most of it only reads; the writes are
+// fetch and fast-forward of base branches (remote.go) and the explicit
+// user actions in ops.go (commit, revert, push, pull, stash apply/drop).
 //
 // Every call runs without a shell, with --no-optional-locks (polling never
 // takes the index lock while another process such as Claude Code commits in
@@ -174,6 +175,9 @@ type FileChange struct {
 	Deleted int    `json:"deleted"`
 	Binary  bool   `json:"binary"`
 	Sig     string `json:"sig"` // changes whenever the right-hand content changes
+	// Src overrides the right-hand revision (untracked files of a stash).
+	Src         string `json:"-"`
+	Uncommitted bool   `json:"uncommitted,omitempty"` // set by the server
 }
 
 const zeroSha = "0000000000000000000000000000000000000000"
@@ -410,6 +414,7 @@ func (r *Repo) Fingerprint() (string, error) {
 	for _, args := range [][]string{
 		{"rev-parse", "HEAD"},
 		{"for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/remotes"},
+		{"stash", "list", "--format=%H"},
 	} {
 		out, err := r.run(args...)
 		if err != nil {

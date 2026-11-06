@@ -77,7 +77,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.danger { color: var(--c-stale); }
 
 #toolbar {
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
 }
 #toolbar label { display: flex; align-items: center; gap: 6px; color: var(--fg-dim); }
@@ -253,7 +253,7 @@ tr.crow td.mid { padding: 0; background: var(--panel-2); }
 .ceditor .cbtns { display: flex; gap: 6px; margin-top: 5px; align-items: center; }
 .ceditor .cbtns .hint { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
 
-#comments-panel {
+#comments-panel, #commit-panel {
   position: fixed; top: 44px; right: 12px; width: min(560px, 90vw); max-height: 75vh; overflow: auto;
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px; z-index: 10;
   box-shadow: 0 8px 30px rgba(0,0,0,.35); padding: 10px;
@@ -296,3 +296,38 @@ tr.crow td.mid { padding: 0; background: var(--panel-2); }
 /* comments that cannot be anchored to a visible line (side empty, diff hidden) */
 .orphans { padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
 .orphans-head { color: var(--c-stale); font-size: 12px; margin-bottom: 4px; }
+
+/* ---- git operations --------------------------------------------------------- */
+.tracking { font-weight: 400; font-size: 12px; color: var(--hl-meta); cursor: help; }
+.gitops { display: flex; gap: 4px; }
+.gitops button:disabled, #toolbar button:disabled, #toolbar select:disabled { opacity: .5; cursor: default; }
+#commit-panel .cp-head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+#commit-panel .cp-head b { flex: 1; color: var(--fg-strong); }
+#cm-files { max-height: 40vh; overflow: auto; margin-bottom: 8px; }
+.cm-file { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 4px; }
+.cm-file:hover { background: var(--hover); }
+.cm-file label { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; }
+.cm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.cm-name:hover { text-decoration: underline; }
+.cm-new { font-size: 11px; color: var(--c-added-fg, var(--accent)); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; }
+.cm-file button { padding: 0 7px; }
+#commit-panel .empty { color: var(--fg-dim); padding: 14px; text-align: center; }
+#cm-msg {
+  width: 100%; min-height: 70px; resize: vertical; background: var(--bg); color: var(--fg-strong);
+  border: 1px solid var(--border); border-radius: 4px; padding: 6px; font: inherit;
+}
+#commit-panel .cbtns { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+#commit-panel .cbtns .hint { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
+.confirm { display: inline-flex; gap: 5px; align-items: center; color: var(--c-stale); font-size: 12px; }
+.confirm button { padding: 0 8px; }
+.stash-box { margin-top: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); }
+.stash-box .msg-line { color: var(--fg); margin: 2px 0 6px; word-break: break-word; }
+.stash-acts { display: flex; gap: 5px; flex-wrap: wrap; }
+.stash-acts button { padding: 1px 8px; }
+
+/* ---- updates (settings menu) ------------------------------------------------- */
+.upd { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; }
+#update-result { font-size: 12px; color: var(--fg); }
+#update-result:empty { display: none; }
+#auto-update { border: 0; padding: 0; }
+#opt-base { max-width: 240px; }

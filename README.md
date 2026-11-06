@@ -107,6 +107,7 @@ Open pages reconnect and reload into the new version by themselves. If you are t
 - Development builds (`make build` from a working copy, version `dev` or `v…-dirty`) never update themselves.
 - The directory with the binary must be writable by the user running gitreview (true for `~/.local/bin` and `~/go/bin`; not for `/usr/local/bin` installed with `sudo`). Otherwise the update is skipped and the reason is logged.
 - Turn it off with `-no-auto-update` or `GITREVIEW_NO_AUTO_UPDATE=1`.
+- **⚙ → Check for updates** checks right away and offers **Update now** (works with automatic updates turned off too).
 
 ## Security
 
@@ -119,7 +120,7 @@ Further protections, also active with `-no-auth`:
 - Writes (comments, export) are accepted only as same-origin JSON requests, so a foreign web page open in your browser cannot inject text into `REVIEW.md`.
 - To prevent DNS rebinding, the `Host` header must be an IP address, `localhost` or the machine's hostname. Allow other names with `-allow-host vm.example.com,dev-vm`.
 - Only files from the list of changed files can be read.
-- The server does not touch your working tree or the checked-out branch. It writes only `REVIEW.md`, `.git/gitreview/comments.json` and, on **Fetch**, remote-tracking branches and fast-forwards of local base branches.
+- On its own the server does not touch your working tree or the checked-out branch: it writes `REVIEW.md`, `.git/gitreview/comments.json` and, on **Fetch**, remote-tracking branches and fast-forwards of local base branches. Everything else (commit, revert, push, pull, stash) happens only when you click it, see [Git operations](#git-operations).
 
 ## Features
 
@@ -142,6 +143,18 @@ Further protections, also active with `-no-auth`:
   - `REVIEW.md` is added to `.git/info/exclude` automatically, so it never gets committed,
   - copying to the clipboard works over plain http too.
 - **Settings (⚙):** dark (Darcula) or light theme, English or Czech UI. The language defaults to your browser's; the exported `REVIEW.md` follows the UI language.
+
+## Git operations
+
+Basic operations to finish a review without a terminal. Another agent may be working in the same repository at the same time, so none of them forces anything:
+
+- **Commit (n):** opens a panel with the uncommitted files (staged, unstaged and new). Untick what should stay out, write a message, Commit (Ctrl+Enter). Only the ticked files are committed; other staged changes stay staged. If HEAD moved since the panel was loaded (someone committed meanwhile), the commit is refused.
+- **↶ Revert:** in the commit panel or in the diff header of an uncommitted file. Discards its uncommitted changes (a new file is deleted) after an inline confirmation.
+- **Push:** pushes the current branch; without an upstream it creates `origin/<branch>` and sets it (`-u`). Never forced, a rejected push is reported. `↑N ↓M` next to the branch shows what there is to push and pull (as of the last fetch).
+- **Pull:** `git pull --ff-only`. A diverged branch or a pull that would overwrite uncommitted files is refused by git and reported.
+- **Stash:** stashes are listed in the *Against* selector. Choosing one shows what it contains (against the commit it was made on, including untracked files of `stash -u`) with the same diff view. **Apply**, **Pop** and **Drop** act on it; Apply/Pop are refused when a file of the stash has uncommitted changes, Pop and Drop ask for confirmation. Creating stashes is intentionally not offered.
+
+Only one git operation runs at a time. Commits use your normal git identity and run the repository's hooks; push and pull need non-interactive credentials (ssh agent, credential helper).
 
 ## Key bindings
 

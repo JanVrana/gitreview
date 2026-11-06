@@ -38,6 +38,9 @@ const state = {
   seq: { diff: 0, files: 0, comments: 0 }, // latest request per kind; older responses are dropped
   inflight: 0,          // user-initiated diff loads in progress
   error: null,
+  pending: { head: '', files: [] }, // uncommitted files (commit panel)
+  cmUnchecked: new Set(), // files the user excluded from the commit
+  confirm: null,        // pending confirmation: {kind: 'revert', path} | {kind: 'stash', action}
 };
 
 // ---- helpers -------------------------------------------------------------------
@@ -56,8 +59,14 @@ async function api(url, opts = {}) {
   return data;
 }
 
+/* The base selector also lists stashes ("stash:<sha>"): browsing one compares
+   it with the commit it was made on. */
+const stashSha = () => state.opts.base.startsWith('stash:') ? state.opts.base.slice(6) : null;
+
 function compareParams(extra = {}) {
   const o = state.opts;
+  const sh = stashSha();
+  if (sh) return new URLSearchParams({ stash: sh, ws: o.ws ? '1' : '0', ...extra }).toString();
   return new URLSearchParams({ base: o.base, left: o.left, right: o.right, ws: o.ws ? '1' : '0', ...extra }).toString();
 }
 
@@ -76,6 +85,19 @@ function fmtSize(n) {
 }
 
 const statusName = st => t('st')[st] || st;
+
+function ago(unix) {
+  const s = Date.now() / 1000 - unix;
+  const rtf = new Intl.RelativeTimeFormat(t('locale'), { numeric: 'auto' });
+  for (const [u, n] of [['day', 86400], ['hour', 3600], ['minute', 60]]) {
+    if (s >= n) return rtf.format(-Math.floor(s / n), u);
+  }
+  return rtf.format(0, 'minute');
+}
+
+const confirmHtml = (text, attr) =>
+  `<span class="confirm">${esc(text)} <button ${attr}="yes" class="danger">${t('yes')}</button>` +
+  `<button ${attr}="no">${t('no')}</button></span>`;
 
 /* Label of one comparison side; the working tree gets a translated suffix. */
 const sideLabel = sd => sd.rev ? sd.label : `${sd.label} – ${t('worktree')}`;
@@ -427,8 +449,16 @@ function renderHeader() {
     `<span class="dh-nav"><button data-nav="prev" title="${esc(t('prevChange'))}">↑</button>` +
     `<span id="nav-pos" class="nav-pos"></span>` +
     `<button data-nav="next" title="${esc(t('nextChange'))}">↓</button>` +
+    revertHtml(f) +
     `<button data-nav="expand" class="${state.expandAll ? 'on' : ''}" title="${esc(t(state.expandAll ? 'collapseTitle' : 'expandTitle'))}">` +
     `${t(state.expandAll ? 'collapseAll' : 'expandAll')}</button></span></div>${sides}`;
+}
+
+function revertHtml(f) {
+  if (stashSha() || !f.uncommitted) return '';
+  const c = state.confirm;
+  if (c && c.kind === 'revert' && c.path === f.path) return confirmHtml(t('revertConfirm', f.path), 'data-nav');
+  return `<button data-nav="revert" title="${esc(t('revertTitle'))}">${t('revert')}</button>`;
 }
 
 function renderDiff({ keepScroll = true } = {}) {
@@ -623,13 +653,22 @@ async function loadInfo() {
   const prev = state.info && state.info.version;
   state.info = await api('/api/info');
   if (prev && state.info.version && state.info.version !== prev) reloadWhenIdle(state.info.version);
-  const valid = b => state.info.bases.some(x => x.exists && x.name === b) || state.info.branches.includes(b);
+  const valid = b => state.info.bases.some(x => x.exists && x.name === b) || state.info.branches.includes(b) ||
+    (state.info.stashes || []).some(x => 'stash:' + x.sha === b);
   if (!valid(state.opts.base)) {
     const first = state.info.bases.find(b => b.exists);
     state.opts.base = first ? first.name : (state.info.branches[0] || 'develop');
   }
   renderToolbar();
   $('#app-version').textContent = 'gitreview ' + (state.info.version || '');
+}
+
+async function loadStatus() {
+  try { state.pending = await api('/api/status'); } catch { return; }
+  const b = $('#pending-count');
+  b.textContent = state.pending.files.length;
+  b.classList.toggle('has', state.pending.files.length > 0);
+  if (!$('#commit-panel').hidden) renderCommitFiles();
 }
 
 async function loadFiles() {
@@ -722,7 +761,7 @@ async function refresh() {
   // its scroll target would be lost – try again once it has loaded
   if (state.inflight) { scheduleRefresh(); return; }
   try { await loadInfo(); } catch { /* keep previous */ }
-  await Promise.all([loadFiles(), loadComments()]);
+  await Promise.all([loadFiles(), loadComments(), loadStatus()]);
   if (state.inflight) { scheduleRefresh(); return; }
   if (state.current && state.files.some(f => f.path === state.current)) {
     await openFile(state.current, { keepScroll: true });
@@ -788,10 +827,21 @@ function renderToolbar() {
     `${b.exists ? (b.ref !== b.name ? ` (${esc(b.ref)})` : '') : ` – ${t('notExists')}`}` +
     `${b.behind ? ` ↓${b.behind}` : ''}</option>`).join('');
   const others = info.branches.filter(b => !info.bases.some(x => x.name === b || x.ref === b));
+  const stashes = info.stashes || [];
   sel.innerHTML = main + (others.length
     ? `<optgroup label="${t('otherBranches')}">${others.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`
+    : '') + (stashes.length
+    ? `<optgroup label="${t('stashes')}">${stashes.map(st => `<option value="stash:${esc(st.sha)}" title="${esc(st.message)}">` +
+      `${esc(st.ref)}: ${esc(st.message.length > 50 ? st.message.slice(0, 49) + '…' : st.message)} (${esc(ago(st.time))})</option>`).join('')}</optgroup>`
     : '');
   sel.value = state.opts.base;
+  applyMode();
+
+  const tr = info.tracking || {}, te = $('#tracking');
+  te.textContent = head.detached ? '' : !tr.upstream ? '⇡' : [tr.ahead ? `↑${tr.ahead}` : '', tr.behind ? `↓${tr.behind}` : ''].join(' ').trim();
+  te.title = head.detached ? '' : tr.upstream ? t('trackingTitle', tr.upstream, tr.ahead, tr.behind) : t('noUpstream');
+  $('#btn-push').disabled = head.detached || (!!tr.upstream && !tr.ahead);
+  $('#btn-pull').disabled = head.detached || !tr.upstream;
   renderBehind();
   $('#opt-left').value = state.opts.left;
   $('#opt-right').value = state.opts.right;
@@ -872,7 +922,7 @@ function renderSidebar() {
   sum.innerHTML = `<b>${state.files.length}</b> ${t('files', state.files.length)} · <span class="stat"><span class="a">+${add}</span> <span class="d">−${del}</span></span>` +
     `<span class="lbl" title="${esc(sideLabel(c.left))}">◀ ${esc(sideLabel(c.left))}</span>` +
     `<span class="lbl" title="${esc(sideLabel(c.right))}">▶ ${esc(sideLabel(c.right))}</span>` +
-    (c.onBase ? `<span class="lbl err">${esc(t('onBase', c.base))}</span>` : '');
+    (c.onBase ? `<span class="lbl err">${esc(t('onBase', c.base))}</span>` : '') + stashBoxHtml(c.stash);
 
   const viewed = viewedMap();
   const counts = {};
@@ -921,6 +971,129 @@ function renderSidebar() {
   state.order = order;
 }
 
+function stashBoxHtml(st) {
+  if (!st) return '';
+  const c = state.confirm;
+  const label = { apply: t('stashApply'), pop: t('stashPop'), drop: t('stashDrop') };
+  const acts = c && c.kind === 'stash'
+    ? confirmHtml(t('stashConfirm', label[c.action], st.ref), 'data-stash')
+    : ['apply', 'pop', 'drop'].map(a => `<button data-stash="${a}"${a === 'drop' ? ' class="danger"' : ''} ` +
+      `title="${esc(t('stash' + a[0].toUpperCase() + a.slice(1) + 'Title'))}">${label[a]}</button>`).join('');
+  return `<div class="stash-box"><div><b>${esc(st.ref)}</b> · ${esc(ago(st.time))}</div>` +
+    `<div class="msg-line">${esc(st.message)}</div><div class="stash-acts">${acts}</div></div>`;
+}
+
+// ---- git operations ------------------------------------------------------------------------
+function applyMode() {
+  const stash = !!stashSha();
+  document.body.classList.toggle('stash-mode', stash);
+  for (const s of ['#opt-left', '#opt-right', '#btn-comments', '#btn-export', '#btn-copy']) $(s).disabled = stash;
+}
+
+async function gitOp(btn, url, json, done) {
+  btn.disabled = true;
+  try {
+    const r = await api(url, { method: 'POST', json });
+    toast(done(r), false, 6000);
+    return true;
+  } catch (e) {
+    toast(e.message, true, 12000);
+    return false;
+  } finally {
+    btn.disabled = false;
+    await refresh();
+  }
+}
+
+const pushDone = r => r.created ? t('pushedNew', r.upstream) : t('pushed', r.commits, r.upstream);
+const pullDone = r => r.status === 'updated' ? t('pulled', r.commits) : t('pullUptodate');
+
+async function revertFile(path) {
+  state.confirm = null;
+  try {
+    await api('/api/revert', { method: 'POST', json: { path } });
+    toast(t('reverted', path));
+  } catch (e) { toast(e.message, true, 10000); }
+  await refresh();
+}
+
+async function stashAction(action) {
+  const st = state.compare && state.compare.stash;
+  state.confirm = null;
+  if (!st) return;
+  const label = { apply: t('stashApply'), pop: t('stashPop'), drop: t('stashDrop') }[action];
+  try {
+    await api('/api/stash', { method: 'POST', json: { sha: st.sha, action } });
+    toast(t('stashDone', label, st.ref));
+  } catch (e) { toast(e.message, true, 12000); renderSidebar(); return; }
+  if (action === 'apply') { await refresh(); return; }
+  // the stash is gone: back to the branch comparison
+  await loadInfo();
+  await changeOpts();
+  loadStatus();
+}
+
+function renderCommitFiles() {
+  const el = $('#cm-files');
+  const fs = state.pending.files;
+  if (!fs.length) { el.innerHTML = `<div class="empty">${t('noPending')}</div>`; return; }
+  const c = state.confirm;
+  el.innerHTML = fs.map(f => {
+    const conf = c && c.kind === 'revert' && c.path === f.path;
+    return `<div class="cm-file" data-path="${esc(f.path)}"><label>` +
+      `<input type="checkbox" class="cm-chk"${state.cmUnchecked.has(f.path) ? '' : ' checked'}>` +
+      `<span class="cm-name">${esc(f.path)}</span>${f.untracked ? `<span class="cm-new">${t('untracked')}</span>` : ''}</label>` +
+      (conf ? confirmHtml(t('revertConfirm', f.path), 'data-act')
+        : `<button data-act="revert" title="${esc(t('revertTitle'))}">${t('revert')}</button>`) + '</div>';
+  }).join('');
+}
+
+function toggleCommitPanel(open) {
+  const p = $('#commit-panel');
+  p.hidden = !open;
+  if (!open) return;
+  $('#comments-panel').hidden = true;
+  renderCommitFiles();
+  loadStatus();
+  $('#cm-msg').focus();
+}
+
+async function doCommit() {
+  const paths = state.pending.files.map(f => f.path).filter(p => !state.cmUnchecked.has(p));
+  const message = $('#cm-msg').value.trim();
+  if (!paths.length) { toast(t('noSelection'), true); return; }
+  if (!message) { toast(t('emptyMessage'), true); $('#cm-msg').focus(); return; }
+  const ok = await gitOp($('#commit-panel [data-act="commit"]'), '/api/commit',
+    { paths, message, head: state.pending.head }, r => t('committed', r.sha.slice(0, 8), paths.length));
+  if (ok) { $('#cm-msg').value = ''; state.cmUnchecked.clear(); }
+}
+
+// ---- updates (settings menu) ---------------------------------------------------------------
+async function checkUpdate() {
+  const res = $('#update-result'), now = $('#btn-update-now');
+  res.textContent = t('checking');
+  now.hidden = true;
+  try {
+    const u = await api('/api/update');
+    res.textContent = u.newer ? t('updateAvailable', u.latest) : t('upToDate', u.current || u.latest);
+    now.hidden = !u.newer;
+    $('#auto-update').textContent = t(u.auto ? 'autoOn' : 'autoOff');
+  } catch (e) { res.textContent = e.message; }
+}
+
+async function updateNow() {
+  const res = $('#update-result'), now = $('#btn-update-now');
+  now.disabled = true;
+  res.textContent = t('updating');
+  try {
+    const u = await api('/api/update', { method: 'POST' });
+    res.textContent = t('updateInstalled', u.installed); // the page reloads once the new server is up
+  } catch (e) {
+    res.textContent = e.message;
+    now.disabled = false;
+  }
+}
+
 // ---- comments panel ------------------------------------------------------------------------
 let confirmClear = false;
 function renderCommentsPanel() {
@@ -943,6 +1116,7 @@ function renderCommentsPanel() {
 
 // ---- actions -----------------------------------------------------------------------------------
 function startComment(side, line) {
+  if (stashSha()) { toast(t('stashNoComments')); return; }
   if (!state.diff || state.diff.file.path !== state.current) return; // a different file is loading
   state.editing = { side, line };
   state.draft = '';
@@ -1044,6 +1218,8 @@ function applyLang(l) {
 async function changeOpts() {
   const o = state.opts;
   o.base = $('#opt-base').value;
+  state.confirm = null;
+  applyMode();
   renderBehind();
   o.left = $('#opt-left').value;
   o.right = $('#opt-right').value;
@@ -1066,12 +1242,53 @@ function bindUI() {
   $('#set-lang').addEventListener('change', e => applyLang(e.target.value));
   $('#btn-export').onclick = EXPORT_ACTIONS.export;
   $('#btn-fetch').onclick = fetchRemote;
+  $('#btn-push').onclick = e => gitOp(e.currentTarget, '/api/push', {}, pushDone);
+  $('#btn-pull').onclick = e => gitOp(e.currentTarget, '/api/pull', {}, pullDone);
+  $('#btn-commit').onclick = () => toggleCommitPanel($('#commit-panel').hidden);
+  $('#btn-check-update').onclick = checkUpdate;
+  $('#btn-update-now').onclick = updateNow;
+  const cp = $('#commit-panel');
+  cp.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-act]');
+    const row = e.target.closest('.cm-file');
+    if (!btn) {
+      if (e.target.classList.contains('cm-name') && row) {
+        e.preventDefault(); // don't toggle the checkbox
+        if (state.files.some(f => f.path === row.dataset.path)) openFile(row.dataset.path);
+        else toast(t('fileNotCompared'), true);
+      }
+      return;
+    }
+    const act = btn.dataset.act;
+    if (act === 'close') toggleCommitPanel(false);
+    else if (act === 'commit') doCommit();
+    else if (act === 'revert') { state.confirm = { kind: 'revert', path: row.dataset.path }; renderCommitFiles(); }
+    else if (act === 'yes') revertFile(row.dataset.path);
+    else if (act === 'no') { state.confirm = null; renderCommitFiles(); }
+  });
+  cp.addEventListener('change', e => {
+    if (!e.target.classList.contains('cm-chk')) return;
+    const p = e.target.closest('.cm-file').dataset.path;
+    e.target.checked ? state.cmUnchecked.delete(p) : state.cmUnchecked.add(p);
+  });
+  $('#cm-msg').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doCommit(); }
+  });
+  $('#summary').addEventListener('click', e => {
+    const b = e.target.closest('button[data-stash]');
+    if (!b) return;
+    const a = b.dataset.stash;
+    if (a === 'yes') stashAction(state.confirm.action);
+    else if (a === 'no') { state.confirm = null; renderSidebar(); }
+    else if (a === 'apply') stashAction('apply');
+    else { state.confirm = { kind: 'stash', action: a }; renderSidebar(); }
+  });
   $('#btn-copy').onclick = EXPORT_ACTIONS.copy;
   $('#btn-comments').onclick = () => {
     const p = $('#comments-panel');
     p.hidden = !p.hidden;
     confirmClear = false;
-    if (!p.hidden) renderCommentsPanel();
+    if (!p.hidden) { $('#commit-panel').hidden = true; renderCommentsPanel(); }
   };
 
   $('#comments-panel').addEventListener('click', async e => {
@@ -1155,8 +1372,12 @@ function bindUI() {
   $('#diff-header').addEventListener('click', e => {
     const b = e.target.closest('button[data-nav]');
     if (!b) return;
-    if (b.dataset.nav === 'expand') toggleExpandAll();
-    else gotoChange(b.dataset.nav === 'next' ? 1 : -1);
+    const nv = b.dataset.nav;
+    if (nv === 'expand') toggleExpandAll();
+    else if (nv === 'revert') { state.confirm = { kind: 'revert', path: state.current }; renderHeader(); updateNavPos(); }
+    else if (nv === 'yes') revertFile(state.confirm.path);
+    else if (nv === 'no') { state.confirm = null; renderHeader(); updateNavPos(); }
+    else gotoChange(nv === 'next' ? 1 : -1);
   });
   sc.addEventListener('wheel', e => {
     const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
@@ -1181,6 +1402,8 @@ function bindUI() {
     if (e.key === 'Escape') {
       if (!$('#settings-menu').hidden) $('#settings-menu').hidden = true;
       else if (!$('#comments-panel').hidden) $('#comments-panel').hidden = true;
+      else if (!$('#commit-panel').hidden) toggleCommitPanel(false);
+      else if (state.confirm) { state.confirm = null; renderHeader(); updateNavPos(); renderSidebar(); renderCommitFiles(); }
       else if (state.editing) cancelEdit();
       return;
     }
@@ -1228,7 +1451,7 @@ async function init() {
     renderMessage(`<span class="err">${esc(e.message)}</span>`);
     return;
   }
-  await Promise.all([loadComments(), loadFiles()]);
+  await Promise.all([loadComments(), loadFiles(), loadStatus()]);
   const last = LS.get('file:' + state.info.root, null);
   const first = state.files.some(f => f.path === last) ? last : state.order[0];
   if (first) openFile(first);

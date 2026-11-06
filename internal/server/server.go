@@ -35,7 +35,9 @@ type Server struct {
 	auth       *tokenAuth // nil = no authentication
 	version    string
 	watch      *watcher
-	fetching   sync.Mutex // one fetch at a time
+	writing    sync.Mutex // one git write (fetch, commit, push, …) at a time
+	updater    Updater    // nil = no manual updates
+	updating   sync.Mutex
 }
 
 // Options configure a Server.
@@ -49,6 +51,8 @@ type Options struct {
 	// Version is shown in the UI; a change seen after reconnecting makes
 	// open pages reload.
 	Version string
+	// Updater enables checking for and installing updates from the UI.
+	Updater Updater
 }
 
 // New creates a server for repo; web holds index.html and assets.
@@ -61,7 +65,7 @@ func New(repo *git.Repo, web fs.FS, opts Options) (*Server, error) {
 	for _, h := range opts.AllowHosts {
 		hosts[strings.ToLower(h)] = true
 	}
-	return &Server{repo: repo, store: review.NewStore(dir), web: web, allowHosts: hosts, auth: newTokenAuth(opts.Token), version: opts.Version, watch: newWatcher(repo)}, nil
+	return &Server{repo: repo, store: review.NewStore(dir), web: web, allowHosts: hosts, auth: newTokenAuth(opts.Token), version: opts.Version, updater: opts.Updater, watch: newWatcher(repo)}, nil
 }
 
 // Handler returns the HTTP handler.
@@ -77,6 +81,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/comments", api(s.commentDelete))
 	mux.Handle("POST /api/export", api(s.export))
 	mux.Handle("POST /api/fetch", api(s.fetch))
+	mux.Handle("GET /api/status", api(s.status))
+	mux.Handle("POST /api/commit", api(s.commit))
+	mux.Handle("POST /api/revert", api(s.revert))
+	mux.Handle("POST /api/push", api(s.push))
+	mux.Handle("POST /api/pull", api(s.pull))
+	mux.Handle("POST /api/stash", api(s.stashAction))
+	mux.Handle("GET /api/update", api(s.updateCheck))
+	mux.Handle("POST /api/update", api(s.updateNow))
 	static := http.FileServerFS(s.web)
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
@@ -182,15 +194,19 @@ type side struct {
 }
 
 type compare struct {
-	Base    string `json:"base"`   // ref actually used, e.g. origin/develop
-	OnBase  bool   `json:"onBase"` // HEAD is the base commit
-	Left    side   `json:"left"`
-	Right   side   `json:"right"`
-	IgnoreW bool   `json:"ignoreWhitespace"`
+	Base    string     `json:"base"`   // ref actually used, e.g. origin/develop
+	OnBase  bool       `json:"onBase"` // HEAD is the base commit
+	Left    side       `json:"left"`
+	Right   side       `json:"right"`
+	IgnoreW bool       `json:"ignoreWhitespace"`
+	Stash   *git.Stash `json:"stash,omitempty"` // browsing a stash instead of the branch
 }
 
 func (s *Server) resolve(r *http.Request) (*compare, error) {
 	q := r.URL.Query()
+	if sha := q.Get("stash"); sha != "" {
+		return s.resolveStash(sha, q.Get("ws") == "1")
+	}
 	baseName := q.Get("base")
 	if baseName == "" {
 		baseName = "develop"
@@ -230,6 +246,28 @@ func (s *Server) resolve(r *http.Request) (*compare, error) {
 	return c, nil
 }
 
+// resolveStash compares a stash with the commit it was made on.
+func (s *Server) resolveStash(sha string, ws bool) (*compare, error) {
+	if !shaRe.MatchString(sha) {
+		return nil, badRequest(errors.New("invalid stash"))
+	}
+	st, err := s.repo.FindStash(sha)
+	if err != nil {
+		return nil, httpError{http.StatusNotFound, err}
+	}
+	parent, err := s.repo.Verify(sha + "^1")
+	if err != nil {
+		return nil, err
+	}
+	return &compare{
+		Base:    st.Ref,
+		IgnoreW: ws,
+		Stash:   &st,
+		Left:    side{Rev: parent, Label: fmt.Sprintf("%s base @ %s", st.Ref, git.ShortSha(parent))},
+		Right:   side{Rev: sha, Label: fmt.Sprintf("%s: %s", st.Ref, st.Message)},
+	}, nil
+}
+
 // changed resolves the comparison and lists its changed files. Our own
 // REVIEW.md is never part of the list (in case it is not git-ignored).
 func (s *Server) changed(r *http.Request) (*compare, []git.FileChange, error) {
@@ -237,13 +275,19 @@ func (s *Server) changed(r *http.Request) (*compare, []git.FileChange, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if c.Stash != nil {
+		files, err := s.repo.StashFiles(*c.Stash)
+		return c, files, err
+	}
 	files, err := s.repo.ChangedFiles(c.Left.Rev, c.Right.Rev)
 	if err != nil {
 		return nil, nil, err
 	}
+	pending, _ := s.repo.Uncommitted()
 	out := make([]git.FileChange, 0, len(files))
 	for _, f := range files {
 		if f.Status != "U" || f.Path != review.ExportFile {
+			_, f.Uncommitted = pending[f.Path]
 			out = append(out, f)
 		}
 	}
@@ -279,11 +323,21 @@ func (s *Server) info(*http.Request) (any, error) {
 		}
 		bases = append(bases, b)
 	}
+	head := s.repo.Head()
+	branch := map[string]any{}
+	if head.Branch != "" {
+		if up := s.repo.Upstream(head.Branch); up != "" {
+			a, b, _ := s.repo.AheadBehind(head.Branch, up)
+			branch = map[string]any{"upstream": up, "ahead": a, "behind": b}
+		}
+	}
 	return map[string]any{
 		"version":  s.version,
+		"tracking": branch,
+		"stashes":  s.stashes(),
 		"root":     s.repo.Root,
 		"name":     filepath.Base(s.repo.Root),
-		"head":     s.repo.Head(),
+		"head":     head,
 		"bases":    bases,
 		"branches": s.repo.Branches(),
 	}, nil
@@ -351,7 +405,11 @@ func (s *Server) diff(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	right, rightData, err := s.content(c.Right, fc.Path, fc.Status != "D")
+	rightSide := c.Right
+	if fc.Src != "" {
+		rightSide.Rev = fc.Src
+	}
+	right, rightData, err := s.content(rightSide, fc.Path, fc.Status != "D")
 	if err != nil {
 		return nil, err
 	}
@@ -508,10 +566,11 @@ func (s *Server) fetch(r *http.Request) (any, error) {
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	if !s.fetching.TryLock() {
-		return nil, httpError{http.StatusConflict, errors.New("a fetch is already running")}
+	unlock, err := s.lockWrite()
+	if err != nil {
+		return nil, err
 	}
-	defer s.fetching.Unlock()
+	defer unlock()
 	if err := s.repo.Fetch(); err != nil {
 		return nil, httpError{http.StatusBadGateway, err}
 	}
@@ -533,13 +592,13 @@ func (s *Server) fetch(r *http.Request) (any, error) {
 	return map[string]any{"branches": updates}, nil
 }
 
-// PrepareRestart waits for a running fetch to finish and blocks new ones, so
+// PrepareRestart waits for a running git write to finish and blocks new ones, so
 // the process can be replaced without interrupting a git write.
 func (s *Server) PrepareRestart() {
-	s.fetching.Lock()
+	s.writing.Lock()
 }
 
 // AbortRestart undoes PrepareRestart when the restart failed.
 func (s *Server) AbortRestart() {
-	s.fetching.Unlock()
+	s.writing.Unlock()
 }

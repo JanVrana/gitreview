@@ -31,8 +31,12 @@ func newTestOpts(t *testing.T, opts Options) (*httptest.Server, string) {
 	}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
+	testServers[ts] = s
 	return ts, dir
 }
+
+// testServers gives tests access to the Server behind an httptest server.
+var testServers = map[*httptest.Server]*Server{}
 
 func get(t *testing.T, ts *httptest.Server, path string, v any) int {
 	t.Helper()

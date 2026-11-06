@@ -87,7 +87,9 @@ func run() error {
 	} else if *token == "" {
 		*token = server.NewToken()
 	}
-	srv, err := server.New(repo, web, server.Options{AllowHosts: allowedHosts(*allow), Token: *token, Version: buildVersion()})
+	auto := !*noAutoUpdate && os.Getenv("GITREVIEW_NO_AUTO_UPDATE") == "" && update.Release(buildVersion())
+	srv, err := server.New(repo, web, server.Options{AllowHosts: allowedHosts(*allow), Token: *token,
+		Version: buildVersion(), Updater: newUIUpdater(*token, auto)})
 	if err != nil {
 		return err
 	}
@@ -107,7 +109,7 @@ func run() error {
 	if *token == "" {
 		fmt.Println("  ! authentication disabled (-no-auth)")
 	}
-	if !*noAutoUpdate && os.Getenv("GITREVIEW_NO_AUTO_UPDATE") == "" && update.Release(buildVersion()) {
+	if auto {
 		go autoUpdate(srv, *token)
 	}
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}

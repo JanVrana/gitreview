@@ -94,7 +94,7 @@ Další ochrany, aktivní i s `-no-auth`:
 - Zápisy (komentáře, export) přijímá jen jako JSON ze stejného originu. Cizí web otevřený v prohlížeči tak nemůže podstrčit text do REVIEW.md.
 - Přístup přes doménové jméno je kvůli DNS rebindingu povolený jen pro IP adresy, `localhost` a hostname stroje. Další jména povolíš přes `-allow-host vm.firma.cz,dev-vm`.
 - Číst lze jen soubory ze seznamu změn.
-- Pracovní kopie ani checkoutnuté větve se server nedotkne. Zapisuje jen `REVIEW.md`, `.git/gitreview/comments.json` a při **Fetch** remote-tracking větve a fast-forward lokálních base větví.
+- Sám od sebe se server pracovní kopie ani checkoutnuté větve nedotkne: zapisuje `REVIEW.md`, `.git/gitreview/comments.json` a při **Fetch** remote-tracking větve a fast-forward lokálních base větví. Všechno ostatní (commit, revert, push, pull, stash) jen na tvoje kliknutí, viz [Git operace](#git-operace).
 
 ## Automatické aktualizace
 
@@ -109,6 +109,7 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
 - Vývojové buildy (`make build` z pracovní kopie, verze `dev` nebo `v…-dirty`) se samy neaktualizují.
 - Adresář s binárkou musí být zapisovatelný pro uživatele, pod kterým gitreview běží (platí pro `~/.local/bin` i `~/go/bin`, ne pro `/usr/local/bin` instalované přes `sudo`). Jinak se aktualizace přeskočí a důvod se vypíše do logu.
 - Vypnout jde přes `-no-auto-update` nebo `GITREVIEW_NO_AUTO_UPDATE=1`.
+- **⚙ → Zkontrolovat aktualizace** zkontroluje hned a nabídne **Aktualizovat teď** (funguje i s vypnutými automatickými aktualizacemi).
 
 ## Co umí
 
@@ -133,6 +134,18 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
   - Komentáře se ukládají do `.git/gitreview/comments.json`. `REVIEW.md` se automaticky přidá do `.git/info/exclude`, takže se necommitne.
   - Když se řádek pod komentářem změní, komentář se označí jako „zastaralý“.
 - **Nastavení (⚙):** tmavé (Darcula) nebo světlé téma, angličtina nebo čeština. Výchozí jazyk se řídí prohlížečem; exportovaný `REVIEW.md` je v jazyce UI.
+
+## Git operace
+
+Základní operace, abys review dokončil bez terminálu. Ve stejném repu může zároveň pracovat jiný agent, proto nic z toho nic nevynucuje:
+
+- **Commit (n):** otevře panel s necommitnutými soubory (staged, unstaged i nové). Odškrtni, co commitnout nechceš, napiš zprávu, Commit (Ctrl+Enter). Commitnou se jen zaškrtnuté soubory, jiné staged změny zůstanou staged. Když se od načtení panelu posunul HEAD (někdo mezitím commitnul), commit se odmítne.
+- **↶ Revert:** v commit panelu nebo v hlavičce diffu necommitnutého souboru. Po potvrzení zahodí jeho necommitnuté změny (nový soubor smaže).
+- **Push:** pushne aktuální větev; bez upstreamu vytvoří `origin/<větev>` a nastaví ji (`-u`). Nikdy force, odmítnutý push se nahlásí. `↑N ↓M` u větve ukazuje, co je k pushnutí a ke stažení (podle posledního fetche).
+- **Pull:** `git pull --ff-only`. Rozjetou větev nebo pull, který by přepsal necommitnuté soubory, git odmítne a hláška se zobrazí.
+- **Stash:** stashe jsou ve výběru *Proti*. Po výběru se ukáže, co obsahuje (proti commitu, na kterém vznikl, včetně untracked souborů ze `stash -u`), ve stejném zobrazení diffu. **Apply**, **Pop** a **Drop** s ním pracují; Apply/Pop se odmítne, když má některý soubor stashe necommitnuté změny, Pop a Drop chtějí potvrzení. Vytváření stashů záměrně chybí.
+
+Najednou běží vždy jen jedna git operace. Commity používají tvoji běžnou git identitu a spouští hooky repa; push a pull potřebují neinteraktivní přihlášení (ssh agent, credential helper).
 
 ## Klávesy
 

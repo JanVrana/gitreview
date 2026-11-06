@@ -10,7 +10,12 @@
 </head>
 <body>
 <header id="toolbar">
-  <div class="repo"><span id="repo-name">…</span><span id="branch" class="branch"></span></div>
+  <div class="repo"><span id="repo-name">…</span><span id="branch" class="branch"></span><span id="tracking" class="tracking"></span></div>
+  <div class="gitops">
+    <button id="btn-pull" data-i18n-title="pullTitle" data-i18n="pull">Pull</button>
+    <button id="btn-push" data-i18n-title="pushTitle" data-i18n="push">Push</button>
+    <button id="btn-commit" data-i18n-title="commitTitle"><span data-i18n="commit">Commit</span> <span id="pending-count" class="badge">0</span></button>
+  </div>
   <label><span data-i18n="against">Against</span> <select id="opt-base"></select></label>
   <span id="base-behind" class="behind" hidden></span>
   <button id="btn-fetch" data-i18n-title="fetchTitle" data-i18n="fetch">Fetch</button>
@@ -47,6 +52,12 @@
         </select>
       </label>
       <div id="app-version" class="app-version"></div>
+      <div class="upd">
+        <button id="btn-check-update" data-i18n="checkUpdate">Check for updates</button>
+        <div id="update-result"></div>
+        <button id="btn-update-now" class="primary" data-i18n="updateNow" hidden>Update now</button>
+        <div id="auto-update" class="app-version"></div>
+      </div>
     </div>
   </div>
   <span id="live"></span>
@@ -72,6 +83,13 @@
   </section>
 </div>
 <div id="comments-panel" hidden></div>
+<div id="commit-panel" class="panel" hidden>
+  <div class="cp-head"><b data-i18n="commitPanel">Commit changes</b><button data-act="close">✕</button></div>
+  <div id="cm-files"></div>
+  <textarea id="cm-msg" data-i18n-placeholder="commitPlaceholder" placeholder="Commit message"></textarea>
+  <div class="cbtns"><button class="primary" data-act="commit" data-i18n="commitBtn">Commit</button>
+    <span class="hint" data-i18n="commitHint">Ctrl+Enter = commit</span></div>
+</div>
 <div id="toast" hidden></div>
 <span id="measure" class="mono" aria-hidden="true">xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span>
 <script src="i18n.js"></script>
