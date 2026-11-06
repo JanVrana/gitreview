@@ -133,7 +133,7 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
   - **Kopírovat** (v anglickém UI **Copy**) dá totéž do schránky (funguje i na plain http).
   - Komentáře se ukládají do `.git/gitreview/comments.json`. `REVIEW.md` se automaticky přidá do `.git/info/exclude`, takže se necommitne.
   - Když se řádek pod komentářem změní, komentář se označí jako „zastaralý“.
-- **Nastavení (⚙):** témata Darcula (tmavé), Světlé, Solarized Dark/Light, Nord, Monokai a Midnight, angličtina nebo čeština, písmo a velikost kódu (libovolné nainstalované písmo; výška řádků se přizpůsobí). Výchozí jazyk se řídí prohlížečem; exportovaný `REVIEW.md` je v jazyce UI.
+- **Nastavení (⚙):** témata Darcula (tmavé), Světlé, Solarized Dark/Light, Nord, Monokai a Midnight, angličtina nebo čeština, písmo kódu (nainstalovaná neproporcionální písma, nebo jiné podle názvu) a jeho velikost; výška řádků se přizpůsobí. Výchozí jazyk se řídí prohlížečem; exportovaný `REVIEW.md` je v jazyce UI.
 
 ## Git operace
 

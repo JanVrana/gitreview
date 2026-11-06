@@ -1204,6 +1204,31 @@ function applyTheme(theme) {
 
 /* Code font and size: the row height and line-number column scale with the size. */
 const FONT_SIZE = { min: 9, max: 24, def: 12.5 };
+const FONTS = ['JetBrains Mono', 'Fira Code', 'Fira Mono', 'Source Code Pro', 'Cascadia Code', 'Cascadia Mono', 'IBM Plex Mono',
+  'Roboto Mono', 'Iosevka', 'Hack', 'Inconsolata', 'Victor Mono', 'Ubuntu Mono', 'DejaVu Sans Mono', 'Liberation Mono',
+  'Noto Sans Mono', 'Droid Sans Mono', 'DM Mono', 'Space Mono', 'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'FreeMono'];
+
+/* A font is installed when text set in it differs in width from both fallbacks. */
+function fontInstalled(name) {
+  const ctx = document.createElement('canvas').getContext('2d');
+  const w = f => { ctx.font = `32px ${f}`; return ctx.measureText('mmmwwwiiil1|0Oo@').width; };
+  return ['serif', 'sans-serif'].some(fb => w(`${JSON.stringify(name)}, ${fb}`) !== w(fb));
+}
+
+/* Offers only the fonts this browser actually has, before the "other…" entry. */
+function fillFonts() {
+  const sel = $('#set-font'), other = sel.querySelector('option[value="__custom"]');
+  for (const f of FONTS) {
+    if (!fontInstalled(f)) continue;
+    const o = document.createElement('option');
+    o.value = o.textContent = f;
+    sel.insertBefore(o, other);
+  }
+}
+
+function chosenFont() {
+  return $('#set-font').value === '__custom' ? $('#set-font-custom').value : $('#set-font').value;
+}
 function applyFont(family, size) {
   family = (family || '').trim();
   size = Math.min(FONT_SIZE.max, Math.max(FONT_SIZE.min, +size || FONT_SIZE.def));
@@ -1214,7 +1239,11 @@ function applyFont(family, size) {
   st.setProperty('--code-size', size + 'px');
   st.setProperty('--row-h', Math.round(size * 1.52) + 'px');
   st.setProperty('--num-w', Math.round(size * 4.2) + 'px');
-  $('#set-font').value = family;
+  const sel = $('#set-font'), custom = $('#set-font-custom');
+  const listed = [...sel.options].some(o => o.value === family);
+  sel.value = listed ? family : '__custom';
+  custom.hidden = listed;
+  if (!listed) custom.value = family;
   $('#set-size').value = size;
   LS.set('font', family);
   LS.set('fontSize', size);
@@ -1269,9 +1298,19 @@ function bindUI() {
   document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.settings')) showMenu(false); });
   $('#set-theme').addEventListener('change', e => applyTheme(e.target.value));
   $('#set-lang').addEventListener('change', e => applyLang(e.target.value));
-  $('#set-font').addEventListener('change', e => applyFont(e.target.value, $('#set-size').value));
-  $('#set-size').addEventListener('change', e => applyFont($('#set-font').value, e.target.value));
-  const stepFont = d => applyFont($('#set-font').value, (+$('#set-size').value || FONT_SIZE.def) + d);
+  $('#set-font').addEventListener('change', e => {
+    if (e.target.value !== '__custom') return applyFont(e.target.value, $('#set-size').value);
+    const custom = $('#set-font-custom');
+    custom.hidden = false;
+    custom.focus();
+    custom.select();
+  });
+  // hiding the focused field (another font picked) also fires change: ignore that one
+  const applyCustom = () => { if ($('#set-font').value === '__custom') applyFont($('#set-font-custom').value, $('#set-size').value); };
+  $('#set-font-custom').addEventListener('change', applyCustom);
+  $('#set-font-custom').addEventListener('keydown', e => { if (e.key === 'Enter') applyCustom(); });
+  $('#set-size').addEventListener('change', e => applyFont(chosenFont(), e.target.value));
+  const stepFont = d => applyFont(chosenFont(), (+$('#set-size').value || FONT_SIZE.def) + d);
   $('#font-dec').onclick = () => stepFont(-0.5);
   $('#font-inc').onclick = () => stepFont(0.5);
   $('#btn-export').onclick = EXPORT_ACTIONS.export;
@@ -1477,6 +1516,7 @@ async function init() {
   applyStaticTexts();
   const sw = LS.get('sidebarW', null);
   if (sw) document.body.style.setProperty('--sidebar-w', sw);
+  fillFonts();
   applyFont(LS.get('font', ''), LS.get('fontSize', FONT_SIZE.def));
   bindUI();
   try {

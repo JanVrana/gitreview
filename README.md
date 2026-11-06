@@ -142,7 +142,7 @@ Further protections, also active with `-no-auth`:
   - stored in `.git/gitreview/comments.json`,
   - `REVIEW.md` is added to `.git/info/exclude` automatically, so it never gets committed,
   - copying to the clipboard works over plain http too.
-- **Settings (⚙):** themes Darcula (dark), Light, Solarized Dark/Light, Nord, Monokai and Midnight, English or Czech UI, code font and size (any installed font; row height scales with the size). The language defaults to your browser's; the exported `REVIEW.md` follows the UI language.
+- **Settings (⚙):** themes Darcula (dark), Light, Solarized Dark/Light, Nord, Monokai and Midnight, English or Czech UI, code font (installed monospace fonts, or any other by name) and size; row height scales with the size. The language defaults to your browser's; the exported `REVIEW.md` follows the UI language.
 
 ## Git operations
 

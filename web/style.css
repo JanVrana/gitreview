@@ -197,7 +197,7 @@ button.danger { color: var(--c-stale); }
 }
 #settings-menu[hidden] { display: none; }
 #settings-menu label { justify-content: space-between; gap: 12px; white-space: nowrap; }
-#set-font { width: 150px; }
+#set-font { max-width: 170px; }
 .fsize { display: inline-flex; align-items: center; gap: 4px; }
 .fsize button { padding: 0 7px; }
 #set-size { width: 52px; text-align: right; }
