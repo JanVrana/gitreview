@@ -1,12 +1,33 @@
 # gitreview
 
-Webový nástroj pro review změn aktuální git větve proti `develop` / `master`. Diff se zobrazuje vedle sebe (vlevo originál, vpravo změny) ve stylu IntelliJ. Je určený pro kontrolu práce Claude Code na VM, kde nejsou po ruce desktopové nástroje.
+[![Release](https://img.shields.io/github/v/release/JanVrana/gitreview)](https://github.com/JanVrana/gitreview/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/JanVrana/gitreview)](go.mod)
+![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-blue)
+![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 
-Výsledkem je jedna Go binárka bez závislostí, frontend je v ní zabudovaný (offline, žádné CDN).
+**English** · [Čeština](README.cs.md)
 
-## Instalace
+A web UI for reviewing the changes of your current git branch against `develop` / `master`, with an IntelliJ-style side-by-side diff (original on the left, changes on the right).
 
-Hotová binárka pro Linux / macOS (amd64, arm64) do `~/.local/bin`:
+It was built for reviewing the work of AI coding agents such as Claude Code running on a remote VM, where desktop diff tools are not at hand. Open the page from your own browser, leave comments on lines, and hand them back to the agent as a `REVIEW.md` file.
+
+gitreview is a single Go binary with no dependencies besides `git`. The frontend is embedded and works offline, with no CDN.
+
+> The user interface is currently in Czech. The screenshots and the key bindings below show how to use it.
+
+![Side-by-side diff in the dark theme with a review comment](docs/screenshots/diff-dark.png)
+
+<table>
+<tr>
+<td><img src="docs/screenshots/word-diff.png" alt="Word-level highlighting"><br><sub>Changed words highlighted inside lines</sub></td>
+<td><img src="docs/screenshots/diff-light.png" alt="Light theme"><br><sub>Light theme with folded unchanged regions</sub></td>
+<td><img src="docs/screenshots/comments-panel.png" alt="Comments panel"><br><sub>Comments panel and REVIEW.md export</sub></td>
+</tr>
+</table>
+
+## Install
+
+Prebuilt binary for Linux / macOS (amd64, arm64) into `~/.local/bin`:
 
 ```bash
 mkdir -p ~/.local/bin && curl -fL -o ~/.local/bin/gitreview \
@@ -14,77 +35,93 @@ mkdir -p ~/.local/bin && curl -fL -o ~/.local/bin/gitreview \
   && chmod +x ~/.local/bin/gitreview && gitreview -version
 ```
 
-Pokud `~/.local/bin` nemáš v `PATH`, dej binárku jinam (např. `sudo` do `/usr/local/bin`). Kontrolní součty jsou v `SHA256SUMS` u každého releasu.
+If `~/.local/bin` is not on your `PATH`, put the binary somewhere else, for example `/usr/local/bin` with `sudo`. Every release includes a `SHA256SUMS` file.
 
-S nainstalovaným Go (1.26+):
+With Go 1.26 or newer:
 
 ```bash
 go install github.com/JanVrana/gitreview@latest
 ```
 
-Ze zdrojáků: `git clone https://github.com/JanVrana/gitreview && cd gitreview && make build`.
+From source: `git clone https://github.com/JanVrana/gitreview && cd gitreview && make build`.
 
-Aktualizace = znovu spustit stejný příkaz.
+To update, run the same command again.
 
-## Spuštění
+## Usage
 
 ```bash
-gitreview /cesta/k/repu          # výchozí: aktuální adresář, port 8765, 0.0.0.0
+gitreview /path/to/repo          # defaults: current directory, port 8765, 0.0.0.0
 gitreview -p 9000 -b 127.0.0.1 .
 ```
 
-Potřebuje jen `git` v `PATH`.
+On startup it prints the URLs it is reachable on (the machine's IP addresses). Open one of them in your browser.
 
-Při startu se vypíšou URL (IP adresy VM).
-
-**Bezpečnost:** server nemá autentizaci. Na `0.0.0.0` ho používej jen v důvěryhodné síti, jinak `-b 127.0.0.1` a SSH tunel.
-- Zápisy (komentáře, export) přijímá jen jako JSON ze stejného originu. Cizí web otevřený v prohlížeči tak nemůže podstrčit text do REVIEW.md.
-- Přístup přes doménové jméno je kvůli DNS rebindingu povolený jen pro IP adresy, `localhost` a hostname stroje. Další jména povolíš přes `-allow-host vm.firma.cz,dev-vm`.
-- Číst lze jen soubory ze seznamu změn.
-
-## Co umí
-
-- **Porovnání:**
-  - base `develop` / `master` / `main` / libovolná větev (fallback na `origin/<větev>`),
-  - vlevo *merge-base* (jako PR) nebo *špička base*,
-  - vpravo *pracovní kopie* (včetně necommitnutých a nových souborů) nebo *HEAD*,
-  - přepínač *Ignorovat mezery*.
-- **Seznam souborů:** strom souborů s barvami stavů jako v IntelliJ, počty +/− a checkbox „zkontrolováno“. Ten se sám zruší, když se soubor znovu změní.
-- **Diff:**
-  - zarovnané bloky změn se zvýrazněním změněných slov a zvýrazněním syntaxe (highlight.js),
-  - sbalené nezměněné úseky,
-  - přehledová lišta změn vpravo,
-  - nezávislý horizontální scroll stran.
-- **Auto-refresh:** když Claude změní soubor, commitne nebo přepne větev, UI se samo obnoví (polling ~1,5 s přes SSE).
-- **Review komentáře:**
-  - klikem na číslo řádku přidáš komentář,
-  - **Export REVIEW.md** zapíše komentáře do kořene repa a v Claude pak stačí napsat *„zapracuj REVIEW.md“*,
-  - **Kopírovat** dá totéž do schránky (funguje i na plain http).
-  - Komentáře se ukládají do `.git/gitreview/comments.json`. `REVIEW.md` se automaticky přidá do `.git/info/exclude`, takže se necommitne.
-  - Když se řádek pod komentářem změní, komentář se označí jako „zastaralý“.
-- **Téma:** tmavé (Darcula) a světlé.
-
-## Klávesy
-
-| Klávesa | Akce |
+| Flag | Meaning |
 |---|---|
-| F7 / Shift+F7 | další / předchozí změna (na konci souboru přejde na další soubor) |
-| Alt+↓ / Alt+↑ | další / předchozí soubor |
-| Ctrl+Enter / Esc | uložit / zrušit komentář |
-| Shift+kolečko | horizontální scroll strany pod kurzorem |
+| `-p` | port (default `8765`) |
+| `-b` | listen address (default `0.0.0.0`) |
+| `-allow-host` | extra host names accepted in the `Host` header, comma separated |
+| `-version` | print the version and exit |
 
-## Vývoj
+### Review loop with an AI agent
+
+1. Let the agent work on a branch.
+2. Open gitreview, go through the changed files and click a line number to leave a comment.
+3. Click **Export REVIEW.md**. This writes all comments with code snippets to `REVIEW.md` in the repository root. **Kopírovat** copies the same text to the clipboard instead.
+4. Tell the agent: *"address the comments in REVIEW.md"*.
+5. The page refreshes by itself as the agent edits files. Comments whose line has changed are marked as stale.
+
+## Security
+
+The server has **no authentication**. Run it on `0.0.0.0` only in a trusted network; otherwise use `-b 127.0.0.1` and an SSH tunnel (`ssh -L 8765:localhost:8765 vm`).
+
+- Writes (comments, export) are accepted only as same-origin JSON requests, so a foreign web page open in your browser cannot inject text into `REVIEW.md`.
+- To prevent DNS rebinding, the `Host` header must be an IP address, `localhost` or the machine's hostname. Allow other names with `-allow-host vm.example.com,dev-vm`.
+- Only files from the list of changed files can be read.
+- The server is read-only for the repository. It writes only `REVIEW.md` and `.git/gitreview/comments.json`.
+
+## Features
+
+- **Comparison:**
+  - base `develop` / `master` / `main` / any branch (falls back to `origin/<branch>`),
+  - left side: *merge-base* (like a pull request) or the *tip of the base branch*,
+  - right side: *working tree* (including uncommitted and untracked files) or *HEAD*,
+  - an *ignore whitespace* toggle.
+- **File tree:** IntelliJ-style status colors, +/− line counts and a "reviewed" checkbox that clears itself when the file changes again.
+- **Diff:**
+  - aligned change blocks with similar lines paired, changed words highlighted and syntax highlighting (highlight.js),
+  - folded unchanged regions,
+  - a change overview ruler on the right,
+  - independent horizontal scrolling of each side.
+- **Auto-refresh:** when files change, a commit is made or the branch is switched, the UI reloads by itself (polling about every 1.5 s, pushed over SSE).
+- **Review comments:**
+  - stored in `.git/gitreview/comments.json`,
+  - `REVIEW.md` is added to `.git/info/exclude` automatically, so it never gets committed,
+  - copying to the clipboard works over plain http too.
+- **Themes:** dark (Darcula) and light.
+
+## Key bindings
+
+| Key | Action |
+|---|---|
+| F7 / Shift+F7 | next / previous change (continues into the next file) |
+| Alt+↓ / Alt+↑ | next / previous file |
+| click a line number | add a comment |
+| Ctrl+Enter / Esc | save / cancel a comment |
+| Shift+wheel | scroll the side under the cursor horizontally |
+
+## Development
 
 ```bash
 make test   # go test ./...
 make vet
-make dist   # release binárky do dist/ (gitreview-<os>-<arch> + SHA256SUMS)
+make dist   # release binaries in dist/ (gitreview-<os>-<arch> + SHA256SUMS)
 ```
 
-Struktura:
-- `internal/git`: volání git CLI (`--no-optional-locks`, bez shellu, validace refů a cest)
-- `internal/diff`: převod `git diff -U0` na zarovnané bloky
-- `internal/review`: komentáře a export
-- `internal/lang`: mapování souborů na jazyk (pro zvýraznění syntaxe i export)
-- `internal/server`: HTTP API, ochrana proti CSRF a DNS rebindingu, sdílený SSE watcher
+Layout:
+- `internal/git`: git CLI calls (`--no-optional-locks`, no shell, ref and path validation)
+- `internal/diff`: turns `git diff -U0` into aligned blocks
+- `internal/review`: comments and export
+- `internal/lang`: file-to-language mapping (syntax highlighting and export)
+- `internal/server`: HTTP API, CSRF and DNS-rebinding protection, shared SSE watcher
 - `web/`: vanilla JS frontend
