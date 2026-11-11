@@ -452,7 +452,7 @@ tr.crow td.mid { padding: 0; background: var(--panel-2); }
 #update-result { font-size: 0.923rem; color: var(--fg); }
 #update-result:empty { display: none; }
 #auto-update { border: 0; padding: 0; }
-#opt-base { max-width: 240px; }
+#opt-base, #opt-right { max-width: 240px; }
 .cm-moved {
   display: flex; gap: 8px; align-items: center; margin: 4px 0 8px; padding: 6px 8px;
   border: 1px solid var(--c-stale); border-radius: 4px; color: var(--fg-strong); font-size: 0.923rem;

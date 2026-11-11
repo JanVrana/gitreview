@@ -204,6 +204,8 @@ type compare struct {
 	Right   side       `json:"right"`
 	IgnoreW bool       `json:"ignoreWhitespace"`
 	Stash   *git.Stash `json:"stash,omitempty"` // browsing a stash instead of the branch
+	// RightBranch: the right side is another branch, not the checked-out one.
+	RightBranch bool `json:"rightBranch,omitempty"`
 }
 
 func (s *Server) resolve(r *http.Request) (*compare, error) {
@@ -227,12 +229,24 @@ func (s *Server) resolve(r *http.Request) (*compare, error) {
 	if head.Sha == "" {
 		return nil, badRequest(errors.New("the repository has no commits"))
 	}
-	c := &compare{Base: base, IgnoreW: q.Get("ws") == "1", OnBase: baseSha == head.Sha}
+	// The right side is the working tree, HEAD, or any branch ("branch:<name>",
+	// compared without checking it out).
+	rightName, rightSha := "", head.Sha
+	if name, ok := strings.CutPrefix(q.Get("right"), "branch:"); ok {
+		if !git.ValidRef(name) || !slices.Contains(s.repo.Branches(), name) {
+			return nil, badRequest(fmt.Errorf("branch %q does not exist", name))
+		}
+		if rightSha, err = s.repo.Verify(name); err != nil {
+			return nil, badRequest(err)
+		}
+		rightName = name
+	}
+	c := &compare{Base: base, IgnoreW: q.Get("ws") == "1", OnBase: baseSha == rightSha, RightBranch: rightName != ""}
 
 	if q.Get("left") == "tip" {
 		c.Left = side{Rev: baseSha, Label: fmt.Sprintf("%s @ %s", base, git.ShortSha(baseSha))}
 	} else {
-		mb, err := s.repo.MergeBase(baseSha, head.Sha)
+		mb, err := s.repo.MergeBase(baseSha, rightSha)
 		if err != nil {
 			return nil, badRequest(err)
 		}
@@ -242,7 +256,9 @@ func (s *Server) resolve(r *http.Request) (*compare, error) {
 	if headName == "" {
 		headName = "HEAD"
 	}
-	if q.Get("right") == "head" {
+	if rightName != "" {
+		c.Right = side{Rev: rightSha, Label: fmt.Sprintf("%s @ %s", rightName, git.ShortSha(rightSha))}
+	} else if q.Get("right") == "head" {
 		c.Right = side{Rev: head.Sha, Label: fmt.Sprintf("%s @ %s", headName, git.ShortSha(head.Sha))}
 	} else {
 		c.Right = side{Label: headName} // the UI appends a translated "working tree"
@@ -287,7 +303,10 @@ func (s *Server) changed(r *http.Request) (*compare, []git.FileChange, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	pending, _ := s.repo.Uncommitted()
+	pending := map[string]git.Pending{}
+	if !c.RightBranch { // uncommitted changes belong to the checked-out branch
+		pending, _ = s.repo.Uncommitted()
+	}
 	out := make([]git.FileChange, 0, len(files))
 	for _, f := range files {
 		if f.Status != "U" || f.Path != review.ExportFile {

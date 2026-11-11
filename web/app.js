@@ -702,6 +702,8 @@ async function loadInfo() {
   if (prev && state.info.version && state.info.version !== prev) reloadWhenIdle(state.info.version);
   const valid = b => state.info.bases.some(x => x.exists && x.name === b) || state.info.branches.includes(b) ||
     (state.info.stashes || []).some(x => 'stash:' + x.sha === b);
+  const br = state.opts.right.startsWith('branch:') ? state.opts.right.slice(7) : null;
+  if (br && (!state.info.branches.includes(br) || br === state.info.head.branch)) state.opts.right = 'worktree';
   if (!valid(state.opts.base)) {
     const first = state.info.bases.find(b => b.exists);
     state.opts.base = first ? first.name : (state.info.branches[0] || 'develop');
@@ -921,7 +923,15 @@ function renderToolbar() {
   $('#btn-pull').disabled = head.detached || !tr.upstream;
   renderBehind();
   $('#opt-left').value = state.opts.left;
-  $('#opt-right').value = state.opts.right;
+  // the right side can be any other branch, compared without checking it out
+  const rs = $('#opt-right');
+  rs.querySelector('optgroup')?.remove();
+  const rb = info.branches.filter(b => b !== head.branch);
+  if (rb.length) {
+    rs.insertAdjacentHTML('beforeend', `<optgroup label="${esc(t('rightBranches'))}">` +
+      rb.map(b => `<option value="branch:${esc(b)}">${esc(b)}</option>`).join('') + '</optgroup>');
+  }
+  rs.value = state.opts.right;
   $('#opt-ws').checked = state.opts.ws;
   fitToolbar();
 }
