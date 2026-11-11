@@ -75,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/info", api(s.info))
 	mux.Handle("GET /api/files", api(s.files))
 	mux.Handle("GET /api/diff", api(s.diff))
+	mux.Handle("GET /api/blame", api(s.blame))
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.Handle("GET /api/comments", api(s.commentList))
 	mux.Handle("POST /api/comments", api(s.commentAdd))

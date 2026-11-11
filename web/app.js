@@ -31,11 +31,13 @@ const state = {
   comments: [],
   expanded: new Set(),  // equal-block indexes expanded by the user
   expandAll: LS.get('expandAll', false), // show whole files, no folds
+  blame: LS.get('blame', false), // who changed each line last (git blame)
+  blameData: null, // { diff, left, right } for the diff it was loaded for
   collapsedDirs: new Set(),
   seen: {},             // path -> sig when last opened
   editing: null,        // {side, line} for new comment or {id} for edit
   draft: '',
-  seq: { diff: 0, files: 0, comments: 0 }, // latest request per kind; older responses are dropped
+  seq: { diff: 0, files: 0, comments: 0, blame: 0 }, // latest request per kind; older responses are dropped
   inflight: 0,          // user-initiated diff loads in progress
   error: null,
   pending: { head: '', files: [] }, // uncommitted files (commit panel)
@@ -356,19 +358,50 @@ function buildRows(d, cm) {
 }
 
 // ---- rendering: diff --------------------------------------------------------------
+/* Blame of one line: author and date, shown only where the commit differs
+   from the line above (blameRun holds the last commit per side). */
+let blameRun = {}, blameKind = null;
+const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/* The blame of the previous load of the same file is kept while the new one
+   loads (auto-refresh), as long as the line counts still match. */
+const blameFits = (bd, d) => !!bd && !!d && (bd.diff === d ||
+  (bd.path === d.file.path && bd.nl === d.left.lines.length && bd.nr === d.right.lines.length));
+const NOT_COMMITTED = /^0+$/;
+function blameHtml(side, idx) {
+  const bd = state.blameData;
+  const b = state.blame && blameFits(bd, state.diff) ? bd[side] : null;
+  if (!b) return '';
+  const ci = b.lines[idx];
+  const c = ci >= 0 ? b.commits[ci] : null;
+  if (!c) { blameRun[side] = null; return '<span class="bl"></span>'; }
+  const repeat = blameRun[side] === ci;
+  blameRun[side] = ci;
+  if (NOT_COMMITTED.test(c.sha)) {
+    return `<span class="bl nc" title="${esc(t('notCommitted'))}">${repeat ? '' : esc(t('notCommitted'))}</span>`;
+  }
+  const d = new Date(c.time * 1000);
+  const title = `${c.sha.slice(0, 8)} · ${c.author} · ${d.toLocaleString(t('locale'))}\n${c.summary}`;
+  const text = repeat ? '' : `<span class="ba">${esc(c.author)}</span>` +
+    `<span class="bd">${isoDate(d)}</span>`;
+  return `<span class="bl" title="${esc(title)}">${text}</span>`;
+}
+
 function cellsHtml(side, idx) {
   const s = side === 'left' ? 'l' : 'r';
-  if (idx == null) return `<td class="num filler"></td><td class="code filler" data-s="${s}"></td>`;
+  if (idx == null) { blameRun[side] = null; return `<td class="num filler"></td><td class="code filler" data-s="${s}"></td>`; }
   const html = (side === 'left' ? state.diff.htmlL : state.diff.htmlR)[idx];
-  return `<td class="num" data-side="${side}" data-line="${idx + 1}">${idx + 1}</td>` +
+  return `<td class="num" data-side="${side}" data-line="${idx + 1}">${blameHtml(side, idx)}${idx + 1}</td>` +
     `<td class="code" data-s="${s}"><span class="ln">${html || ' '}</span></td>`;
 }
 
 function rowHtml(row) {
   if (row.kind === 'fold') {
+    blameRun = {};
     return `<tr class="fold" data-block="${row.block}"><td class="num"></td>` +
       `<td class="code" colspan="4">${t('folded', row.count)}</td></tr>`;
   }
+  // blame starts over where a change begins or ends
+  if (row.kind !== blameKind) { blameRun = {}; blameKind = row.kind; }
   let cls = 'k-' + row.kind;
   if (row.first) cls += ' first';
   if (row.last) cls += ' last';
@@ -460,6 +493,7 @@ function renderHeader() {
     `<span id="nav-pos" class="nav-pos"></span>` +
     `<button data-nav="next" title="${esc(t('nextChange'))}">↓</button>` +
     revertHtml(f) +
+    (d && d.left && d.right ? `<button data-nav="blame" class="${state.blame ? 'on' : ''}" title="${esc(t('blameTitle'))}">${t('blame')}</button>` : '') +
     `<button data-nav="expand" class="${state.expandAll ? 'on' : ''}" title="${esc(t(state.expandAll ? 'collapseTitle' : 'expandTitle'))}">` +
     `${t(state.expandAll ? 'collapseAll' : 'expandAll')}</button></span></div>${sides}`;
 }
@@ -487,6 +521,7 @@ function renderDiff({ keepScroll = true } = {}) {
   }
   if (!d.blocks.some(b => b.type === 'change')) { renderMessage(emptyDiffMessage(d), extra); return; }
   let h = extra + '<table class="diff"><colgroup><col class="cn"><col><col class="cm"><col class="cn"><col></colgroup><tbody>';
+  blameRun = {}; blameKind = null;
   for (const row of buildRows(d, cm)) h += rowHtml(row) + commentRowHtml(row, cm);
   h += '</tbody></table>';
   sc.innerHTML = h;
@@ -763,6 +798,28 @@ async function openFile(path, { keepScroll = false, landOn = 'first', line = nul
     if (line) scrollToLine(line.side, line.line);
     else scrollToChange(landOn);
   }
+  loadBlame();
+}
+
+/* Loads the blame of the open diff (after the diff itself, so it never
+   delays it) and redraws when it arrives. */
+async function loadBlame() {
+  const d = state.diff;
+  document.body.classList.toggle('blame', state.blame && !!(d && d.left && d.right));
+  if (!state.blame || !d || !d.left || !d.right) return;
+  if (state.blameData && state.blameData.diff === d) return;
+  const r = await latest('blame', () => api('/api/blame?' + compareParams({ path: d.file.path })).then(b => ({ b }), e => ({ e })));
+  if (!r || state.diff !== d) return;
+  if (r.e) { toast(r.e.message, true); return; }
+  state.blameData = { diff: d, path: d.file.path, nl: d.left.lines.length, nr: d.right.lines.length, left: r.b.left, right: r.b.right };
+  renderDiff();
+}
+
+function toggleBlame() {
+  state.blame = !state.blame;
+  LS.set('blame', state.blame);
+  renderDiff();
+  loadBlame();
 }
 
 let refreshTimer;
@@ -1495,6 +1552,7 @@ function bindUI() {
   const sc = $('#diff-scroll');
   let navPosQueued = false;
   sc.addEventListener('click', e => {
+    if (e.target.closest('.bl')) return; // blame: the tooltip tells the rest
     const rb = e.target.closest('button.rb');
     if (rb) { rb.disabled = true; revertBlock(+rb.dataset.rb); return; }
     const num = e.target.closest('td.num[data-line]');
@@ -1531,6 +1589,7 @@ function bindUI() {
     if (!b) return;
     const nv = b.dataset.nav;
     if (nv === 'expand') toggleExpandAll();
+    else if (nv === 'blame') toggleBlame();
     else if (nv === 'revert') { state.confirm = { kind: 'revert', path: state.current }; renderHeader(); updateNavPos(); }
     else if (nv === 'yes') revertFile(state.confirm.path);
     else if (nv === 'no') { state.confirm = null; renderHeader(); updateNavPos(); }
