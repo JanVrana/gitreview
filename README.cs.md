@@ -123,7 +123,7 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
 - **Diff:**
   - zarovnané bloky změn se zvýrazněním změněných slov a zvýrazněním syntaxe (highlight.js),
   - sbalené nezměněné úseky; tlačítko **⇕ Celý soubor** rozbalí celý soubor (volba se pamatuje),
-  - **Anotace** (v hlavičce diffu, volba se pamatuje) ukáže u každého řádku na obou stranách, kdo a kdy ho naposledy změnil (`git blame`); necommitnuté řádky jsou označené, tooltip ukáže commit a jeho zprávu,
+  - **Anotace** (v hlavičce diffu, volba se pamatuje) ukáže u každého řádku originálu kompaktně datum a příjmení toho, kdo ho naposledy změnil (`git blame`); *⚙ → Anotace i u nové verze* ji přidá i vpravo; necommitnuté řádky jsou označené, tooltip ukáže commit a jeho zprávu,
   - tlačítka **↑ / ↓** s počítadlem změn (3 / 12) pro skoky mezi změnami,
   - přehledová lišta změn vpravo,
   - nezávislý horizontální scroll stran.

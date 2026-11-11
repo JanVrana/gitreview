@@ -32,6 +32,7 @@ const state = {
   expanded: new Set(),  // equal-block indexes expanded by the user
   expandAll: LS.get('expandAll', false), // show whole files, no folds
   blame: LS.get('blame', false), // who changed each line last (git blame)
+  blameRight: LS.get('blameRight', false), // …on the new side too, not only the original
   blameData: null, // { diff, left, right } for the diff it was loaded for
   collapsedDirs: new Set(),
   seen: {},             // path -> sig when last opened
@@ -361,6 +362,8 @@ function buildRows(d, cm) {
 /* Blame of one line: author and date, shown only where the commit differs
    from the line above (blameRun holds the last commit per side). */
 let blameRun = {}, blameKind = null;
+// "Jan Vrána" -> "Vrána": the column is narrow, the tooltip has the full name
+const shortName = n => n.trim().split(/\s+/).pop() || n;
 const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 /* The blame of the previous load of the same file is kept while the new one
    loads (auto-refresh), as long as the line counts still match. */
@@ -369,7 +372,7 @@ const blameFits = (bd, d) => !!bd && !!d && (bd.diff === d ||
 const NOT_COMMITTED = /^0+$/;
 function blameHtml(side, idx) {
   const bd = state.blameData;
-  const b = state.blame && blameFits(bd, state.diff) ? bd[side] : null;
+  const b = state.blame && (side === 'left' || state.blameRight) && blameFits(bd, state.diff) ? bd[side] : null;
   if (!b) return '';
   const ci = b.lines[idx];
   const c = ci >= 0 ? b.commits[ci] : null;
@@ -381,8 +384,7 @@ function blameHtml(side, idx) {
   }
   const d = new Date(c.time * 1000);
   const title = `${c.sha.slice(0, 8)} · ${c.author} · ${d.toLocaleString(t('locale'))}\n${c.summary}`;
-  const text = repeat ? '' : `<span class="ba">${esc(c.author)}</span>` +
-    `<span class="bd">${isoDate(d)}</span>`;
+  const text = repeat ? '' : `<span class="bd">${isoDate(d)}</span><span class="ba">${esc(shortName(c.author))}</span>`;
   return `<span class="bl" title="${esc(title)}">${text}</span>`;
 }
 
@@ -520,7 +522,7 @@ function renderDiff({ keepScroll = true } = {}) {
     return;
   }
   if (!d.blocks.some(b => b.type === 'change')) { renderMessage(emptyDiffMessage(d), extra); return; }
-  let h = extra + '<table class="diff"><colgroup><col class="cn"><col><col class="cm"><col class="cn"><col></colgroup><tbody>';
+  let h = extra + '<table class="diff"><colgroup><col class="cn cl"><col><col class="cm"><col class="cn cr"><col></colgroup><tbody>';
   blameRun = {}; blameKind = null;
   for (const row of buildRows(d, cm)) h += rowHtml(row) + commentRowHtml(row, cm);
   h += '</tbody></table>';
@@ -806,12 +808,15 @@ async function openFile(path, { keepScroll = false, landOn = 'first', line = nul
 async function loadBlame() {
   const d = state.diff;
   document.body.classList.toggle('blame', state.blame && !!(d && d.left && d.right));
+  document.body.classList.toggle('blame-r', state.blameRight);
   if (!state.blame || !d || !d.left || !d.right) return;
-  if (state.blameData && state.blameData.diff === d) return;
-  const r = await latest('blame', () => api('/api/blame?' + compareParams({ path: d.file.path })).then(b => ({ b }), e => ({ e })));
+  const sides = state.blameRight ? 'both' : 'left';
+  const bd = state.blameData;
+  if (bd && bd.diff === d && (bd.sides === 'both' || bd.sides === sides)) return;
+  const r = await latest('blame', () => api('/api/blame?' + compareParams({ path: d.file.path, sides })).then(b => ({ b }), e => ({ e })));
   if (!r || state.diff !== d) return;
   if (r.e) { toast(r.e.message, true); return; }
-  state.blameData = { diff: d, path: d.file.path, nl: d.left.lines.length, nr: d.right.lines.length, left: r.b.left, right: r.b.right };
+  state.blameData = { diff: d, sides, path: d.file.path, nl: d.left.lines.length, nr: d.right.lines.length, left: r.b.left, right: r.b.right };
   renderDiff();
 }
 
@@ -1432,6 +1437,13 @@ function bindUI() {
   document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.settings')) showMenu(false); });
   $('#set-theme').addEventListener('change', e => applyTheme(e.target.value));
   $('#set-lang').addEventListener('change', e => applyLang(e.target.value));
+  $('#set-blame-right').checked = state.blameRight;
+  $('#set-blame-right').addEventListener('change', e => {
+    state.blameRight = e.target.checked;
+    LS.set('blameRight', state.blameRight);
+    loadBlame();
+    renderDiff();
+  });
   $('#set-font').addEventListener('change', e => {
     if (e.target.value !== '__custom') return applyFont(e.target.value, $('#set-size').value);
     const custom = $('#set-font-custom');

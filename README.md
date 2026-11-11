@@ -134,7 +134,7 @@ Further protections, also active with `-no-auth`:
 - **Diff:**
   - aligned change blocks with similar lines paired, changed words highlighted and syntax highlighting (highlight.js),
   - folded unchanged regions; the **⇕ Whole file** button expands the whole file (remembered),
-  - **Annotate** (in the diff header, remembered) shows next to each line who changed it last and when (`git blame`) on both sides; uncommitted lines are marked, the tooltip has the commit and its message,
+  - **Annotate** (in the diff header, remembered) shows next to each line of the original who changed it last and when (`git blame`), compactly as date and surname; *⚙ → Annotate the new side too* adds the right side; uncommitted lines are marked, the tooltip has the commit and its message,
   - **↑ / ↓** buttons with a change counter (3 / 12) to jump between changes,
   - a change overview ruler on the right,
   - independent horizontal scrolling of each side.

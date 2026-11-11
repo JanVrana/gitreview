@@ -11,7 +11,11 @@ func TestBlame(t *testing.T) {
 	ts, _ := newTest(t)
 	type side = git.Blame
 	var b struct{ Left, Right *side }
-	const q = "/api/blame?base=develop&left=mergebase&right=worktree&ws=0&path="
+	var l struct{ Left, Right *side }
+	if get(t, ts, "/api/blame?base=develop&path=main.go", &l); l.Left == nil || l.Right != nil {
+		t.Fatalf("left only: %+v", l)
+	}
+	const q = "/api/blame?base=develop&left=mergebase&right=worktree&ws=0&sides=both&path="
 	if code := get(t, ts, q+"main.go", &b); code != 200 || b.Left == nil || b.Right == nil {
 		t.Fatalf("blame: %d %+v", code, b)
 	}

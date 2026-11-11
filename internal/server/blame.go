@@ -7,7 +7,8 @@ import (
 	"github.com/JanVrana/gitreview/internal/git"
 )
 
-// blame annotates both sides of a changed file: who changed each line last.
+// blame annotates a changed file: who changed each line last. The right
+// side is annotated only with sides=both.
 func (s *Server) blame(r *http.Request) (any, error) {
 	fd, err := s.loadDiff(r, r.URL.Query().Get("path"), true)
 	if err != nil {
@@ -26,7 +27,7 @@ func (s *Server) blame(r *http.Request) (any, error) {
 			return nil, err
 		}
 	}
-	if fd.right.Exists {
+	if fd.right.Exists && r.URL.Query().Get("sides") == "both" {
 		rev := fd.c.Right.Rev
 		if fd.fc.Src != "" {
 			rev = fd.fc.Src
