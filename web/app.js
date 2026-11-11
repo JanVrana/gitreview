@@ -905,11 +905,10 @@ function renderToolbar() {
     `<option value="${esc(b.name)}"${b.exists ? '' : ' disabled'}>${esc(b.name)}` +
     `${b.exists ? (b.ref !== b.name ? ` (${esc(b.ref)})` : '') : ` – ${t('notExists')}`}` +
     `${b.behind ? ` ↓${b.behind}` : ''}</option>`).join('');
-  const others = info.branches.filter(b => !info.bases.some(x => x.name === b || x.ref === b));
+  const isBase = b => info.bases.some(x => x.name === b || x.ref === b);
+  const local = (info.local || []).filter(b => !isBase(b)), remote = (info.remote || []).filter(b => !isBase(b));
   const stashes = info.stashes || [];
-  sel.innerHTML = main + (others.length
-    ? `<optgroup label="${t('otherBranches')}">${others.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`
-    : '') + (stashes.length
+  sel.innerHTML = main + branchGroups(local, remote, '') + (stashes.length
     ? `<optgroup label="${t('stashes')}">${stashes.map(st => `<option value="stash:${esc(st.sha)}" title="${esc(st.message)}">` +
       `${esc(st.ref)}: ${esc(st.message.length > 50 ? st.message.slice(0, 49) + '…' : st.message)} (${esc(ago(st.time))})</option>`).join('')}</optgroup>`
     : '');
@@ -925,16 +924,24 @@ function renderToolbar() {
   $('#opt-left').value = state.opts.left;
   // the right side can be any other branch, compared without checking it out
   const rs = $('#opt-right');
-  rs.querySelector('optgroup')?.remove();
-  const rb = info.branches.filter(b => b !== head.branch);
-  if (rb.length) {
-    rs.insertAdjacentHTML('beforeend', `<optgroup label="${esc(t('rightBranches'))}">` +
-      rb.map(b => `<option value="branch:${esc(b)}">${esc(b)}</option>`).join('') + '</optgroup>');
-  }
+  rs.querySelectorAll('optgroup').forEach(g => g.remove());
+  rs.insertAdjacentHTML('beforeend', branchGroups((info.local || []).filter(b => b !== head.branch), info.remote || [], 'branch:'));
   rs.value = state.opts.right;
+  syncPickers();
   $('#opt-ws').checked = state.opts.ws;
   fitToolbar();
 }
+
+/* Local and remote branches as two option groups; value = prefix + name. */
+function branchGroups(local, remote, prefix) {
+  const group = (label, names) => names.length
+    ? `<optgroup label="${esc(label)}">${names.map(b => `<option value="${esc(prefix + b)}">${esc(b)}</option>`).join('')}</optgroup>` : '';
+  return group(t('localBranches'), local) + group(t('remoteBranches'), remote);
+}
+
+/* The base and right selectors are searchable (picker.js). */
+const pickers = [];
+function syncPickers() { for (const p of pickers) p.sync(); }
 
 /* Drops the select labels (and then the whitespace label) while the toolbar would wrap;
    the controls keep their tooltips. */
@@ -1100,6 +1107,7 @@ function applyMode() {
   const stash = !!stashSha();
   document.body.classList.toggle('stash-mode', stash);
   for (const s of ['#opt-left', '#opt-right', '#btn-comments', '#btn-export', '#btn-copy']) $(s).disabled = stash;
+  syncPickers();
 }
 
 async function gitOp(btn, url, json, done) {
@@ -1436,6 +1444,9 @@ async function changeOpts() {
 
 // ---- events ----------------------------------------------------------------------------------------
 function bindUI() {
+  for (const s of ['#opt-base', '#opt-right']) {
+    pickers.push(makePicker($(s), { placeholder: () => t('searchBranch'), empty: () => t('noMatch') }));
+  }
   ['#opt-base', '#opt-left', '#opt-right', '#opt-ws'].forEach(s => $(s).addEventListener('change', changeOpts));
   const menu = $('#settings-menu'), gear = $('#btn-settings');
   const showMenu = open => {

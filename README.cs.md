@@ -117,6 +117,7 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
   - base `develop` / `master` / `main` / libovolná větev (fallback na `origin/<větev>`),
   - vlevo *merge-base* (jako PR) nebo *špička base*,
   - vpravo *pracovní kopie* (včetně necommitnutých a nových souborů), *HEAD*, nebo **libovolná jiná větev** – dvě větve se porovnají bez checkoutu kterékoli z nich (merge-base se počítá k té větvi),
+  - výběry *Proti* a *Vpravo* dělí větve na **lokální** a **remote** (a stashe) a dají se **prohledávat psaním**: stačí libovolné části názvu (`xor exp` najde `origin/jira/XOR-2048-export`), ↑/↓ a Enter vybere, Esc zavře,
   - přepínač *Ignorovat mezery*.
 - **Fetch:** spustí `git fetch --all --prune` a fast-forwardne lokální `develop` / `master` / `main` (a zvolenou base) na stav z remote, takže porovnáváš proti aktuální podobě větve na remote, ne proti staré lokální kopii. Větev s lokálními commity nebo právě checkoutnutou nechá být a nahlásí to. Když je lokální base pozadu za remote (podle posledního fetche), ukáže se u výběru větve `↓N`. Fetch potřebuje neinteraktivní přihlášení (ssh agent, credential helper), na heslo se nikdy neptá.
 - **Seznam souborů:** strom souborů s barvami stavů jako v IntelliJ, počty +/− a checkbox „zkontrolováno“. Ten se sám zruší, když se soubor znovu změní.

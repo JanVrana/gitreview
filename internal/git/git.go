@@ -139,17 +139,25 @@ func (r *Repo) ResolveBase(name string) (string, error) {
 
 // Branches lists local and remote branch names.
 func (r *Repo) Branches() []string {
-	out, err := r.run("for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes")
+	local, remote := r.BranchesSplit()
+	return append(local, remote...)
+}
+
+// BranchesSplit lists local and remote-tracking branch names separately.
+func (r *Repo) BranchesSplit() (local, remote []string) {
+	out, err := r.run("for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	var res []string
+	local, remote = []string{}, []string{}
 	for l := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if l != "" && !strings.HasSuffix(l, "/HEAD") && l != "origin" {
-			res = append(res, l)
+		if name, ok := strings.CutPrefix(l, "refs/heads/"); ok {
+			local = append(local, name)
+		} else if name, ok := strings.CutPrefix(l, "refs/remotes/"); ok && !strings.HasSuffix(name, "/HEAD") && strings.Contains(name, "/") {
+			remote = append(remote, name)
 		}
 	}
-	return res
+	return local, remote
 }
 
 // MergeBase returns the best common ancestor of a and b.

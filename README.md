@@ -128,6 +128,7 @@ Further protections, also active with `-no-auth`:
   - base `develop` / `master` / `main` / any branch (falls back to `origin/<branch>`),
   - left side: *merge-base* (like a pull request) or the *tip of the base branch*,
   - right side: *working tree* (including uncommitted and untracked files), *HEAD*, or **any other branch** – two branches are compared without checking either out (merge-base is computed against that branch),
+  - the *Against* and *Right* pickers group **local** and **remote** branches (and stashes) and are **searchable**: type any parts of the name (`xor exp` finds `origin/jira/XOR-2048-export`), ↑/↓ and Enter pick, Esc closes,
   - an *ignore whitespace* toggle.
 - **Fetch:** runs `git fetch --all --prune` and fast-forwards the local `develop` / `master` / `main` (and the selected base) to their remote-tracking branches, so you compare against the current remote state, not a stale local copy. A branch with local commits or one that is checked out is left alone and reported. When the local base is behind its remote (as of the last fetch), `↓N` appears next to the base selector. Fetch needs non-interactive credentials (ssh agent, credential helper); it never prompts.
 - **File tree:** IntelliJ-style status colors, +/− line counts and a "reviewed" checkbox that clears itself when the file changes again.

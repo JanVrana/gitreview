@@ -346,6 +346,7 @@ func (s *Server) info(*http.Request) (any, error) {
 		}
 		bases = append(bases, b)
 	}
+	local, remote := s.repo.BranchesSplit()
 	head := s.repo.Head()
 	branch := map[string]any{}
 	if head.Branch != "" {
@@ -362,7 +363,9 @@ func (s *Server) info(*http.Request) (any, error) {
 		"name":     filepath.Base(s.repo.Root),
 		"head":     head,
 		"bases":    bases,
-		"branches": s.repo.Branches(),
+		"branches": append(slices.Clone(local), remote...),
+		"local":    local,
+		"remote":   remote,
 	}, nil
 }
 
