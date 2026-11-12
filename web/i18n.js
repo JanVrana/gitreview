@@ -146,6 +146,10 @@ const I18N = {
     stashConfirm: (act, ref) => `${act} ${ref}?${act === 'Apply' ? '' : ' The stash will be deleted.'}`,
     stashDone: (act, ref) => `${act}: ${ref} done`,
     stashNoComments: 'Comments are not available while browsing a stash',
+    commits: 'Commits',
+    logTitle: 'Commits of the compared range – click one to see only its changes (Alt+← / Alt+→)',
+    allChanges: 'All changes',
+    commitNoComments: 'Comments are not available while viewing a single commit',
     // updates
     checkUpdate: 'Check for updates',
     checking: 'Checking…',
@@ -308,6 +312,10 @@ const I18N = {
     stashConfirm: (act, ref) => `${act} ${ref}?${act === 'Apply' ? '' : ' Stash bude smazán.'}`,
     stashDone: (act, ref) => `${act}: ${ref} hotovo`,
     stashNoComments: 'Při prohlížení stashe nejde komentovat',
+    commits: 'Commity',
+    logTitle: 'Commity porovnávaného rozsahu – klikni na commit pro zobrazení jen jeho změn (Alt+← / Alt+→)',
+    allChanges: 'Všechny změny',
+    commitNoComments: 'Při zobrazení jednoho commitu nejde komentovat',
     // aktualizace
     checkUpdate: 'Zkontrolovat aktualizace',
     checking: 'Kontroluji…',

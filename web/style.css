@@ -482,3 +482,25 @@ tr.crow td.mid { padding: 0; background: var(--panel-2); }
   border: 1px solid var(--c-stale); border-radius: 4px; color: var(--fg-strong); font-size: 0.923rem;
 }
 .cm-moved button { flex: none; }
+
+/* ---- branch log ------------------------------------------------------------ */
+#log { border-bottom: 1px solid var(--border); font-size: 0.923rem; }
+.lg-head {
+  display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; user-select: none;
+  color: var(--fg-strong); font-weight: 600;
+}
+.lg-head .arrow { display: inline-block; width: 10px; transition: transform .1s; color: var(--fg-dim); }
+.lg-head.collapsed .arrow { transform: rotate(-90deg); }
+.lg-head .lg-cur { margin-left: auto; font-family: var(--code-font); font-weight: normal; color: var(--accent); }
+.lg-list { max-height: 30vh; overflow: auto; padding-bottom: 4px; }
+.lg-item {
+  display: flex; align-items: baseline; gap: 6px; padding: 2px 10px 2px 26px; cursor: pointer;
+  white-space: nowrap; user-select: none;
+}
+.lg-item:hover { background: var(--hover); }
+.lg-item.act { background: var(--sel); color: var(--fg-strong); }
+.lg-all { color: var(--fg-dim); font-style: italic; }
+.lg-all.act { font-style: normal; }
+.lg-sha { font-family: var(--code-font); color: var(--accent); flex: none; }
+.lg-subj { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.lg-meta { flex: none; color: var(--fg-dim); font-size: 0.9em; }

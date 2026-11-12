@@ -38,12 +38,15 @@ const state = {
   seen: {},             // path -> sig when last opened
   editing: null,        // {side, line} for new comment or {id} for edit
   draft: '',
-  seq: { diff: 0, files: 0, comments: 0, blame: 0 }, // latest request per kind; older responses are dropped
+  seq: { diff: 0, files: 0, comments: 0, blame: 0, log: 0 }, // latest request per kind; older responses are dropped
   inflight: 0,          // user-initiated diff loads in progress
   error: null,
   pending: { head: '', files: [] }, // uncommitted files (commit panel)
   cmUnchecked: new Set(), // files the user excluded from the commit
   cmHead: null,            // HEAD the open commit panel was reviewed against
+  commit: null,         // sha of the one commit of the branch log being shown, null = all changes
+  log: { commits: [], more: false }, // commits of the compared range
+  logOpen: LS.get('logOpen', true),
   confirm: null,        // pending confirmation: {kind: 'revert', path} | {kind: 'stash', action}
 };
 
@@ -67,11 +70,18 @@ async function api(url, opts = {}) {
    it with the commit it was made on. */
 const stashSha = () => state.opts.base.startsWith('stash:') ? state.opts.base.slice(6) : null;
 
-function compareParams(extra = {}) {
+/* Comments belong to the whole comparison: not while browsing a stash or a
+   single commit, whose line numbers differ. */
+const readOnly = () => !!stashSha() || !!state.commit;
+
+/* whole = the range itself, never narrowed to the selected commit */
+function compareParams(extra = {}, whole = false) {
   const o = state.opts;
   const sh = stashSha();
   if (sh) return new URLSearchParams({ stash: sh, ws: o.ws ? '1' : '0', ...extra }).toString();
-  return new URLSearchParams({ base: o.base, left: o.left, right: o.right, ws: o.ws ? '1' : '0', ...extra }).toString();
+  const p = { base: o.base, left: o.left, right: o.right, ws: o.ws ? '1' : '0' };
+  if (state.commit && !whole) p.commit = state.commit;
+  return new URLSearchParams({ ...p, ...extra }).toString();
 }
 
 let toastTimer;
@@ -295,7 +305,7 @@ function prepareDiff(d) {
 function fileComments() {
   const res = { left: new Map(), right: new Map(), orphans: [] };
   const d = state.diff;
-  const own = state.comments.filter(c => c.file === state.current);
+  const own = readOnly() ? [] : state.comments.filter(c => c.file === state.current);
   if (!d || !d.left || !d.blocks.some(b => b.type === 'change')) {
     res.orphans = own.map(c => ({ ...c, stale: true }));
     return res;
@@ -740,6 +750,57 @@ async function loadFiles() {
   renderSidebar();
 }
 
+/* The commits of the compared range; a selected commit that is gone (amend,
+   rebase, other range) falls back to all changes. */
+async function loadLog() {
+  if (stashSha()) { state.log = { commits: [], more: false }; state.commit = null; return; }
+  const r = await latest('log', () => api('/api/log?' + compareParams({}, true)).then(d => ({ d }), e => ({ e })));
+  if (!r) return;
+  state.log = r.e ? { commits: [], more: false } : r.d;
+  if (state.commit && !state.log.commits.some(c => c.sha === state.commit)) state.commit = null;
+  applyMode();
+  renderLog();
+}
+
+async function selectCommit(sha) {
+  if (state.commit === sha) return;
+  state.commit = sha;
+  applyMode();
+  await loadFiles();
+  const target = state.files.some(f => f.path === state.current) ? state.current : state.order[0];
+  if (target) openFile(target);
+  else { state.current = null; state.diff = null; renderHeader(); renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : t('noChanges')); }
+}
+
+/* Alt+← / Alt+→: older / newer commit ("all changes" is the newest end). */
+function stepCommit(dir) {
+  const list = [null, ...state.log.commits.map(c => c.sha)];
+  if (list.length < 2) return;
+  const i = list.indexOf(state.commit);
+  const j = Math.max(0, Math.min(list.length - 1, i + dir));
+  if (j !== i) selectCommit(list[j]);
+}
+
+function renderLog() {
+  const el = $('#log');
+  const cs = state.log.commits;
+  if (stashSha() || !cs.length) { el.innerHTML = ''; el.hidden = true; return; }
+  el.hidden = false;
+  const item = (c, i) => {
+    const tip = `${c.sha}\n${c.author} · ${new Date(c.time * 1000).toLocaleString(uiLang)}${c.parents.length > 1 ? ' · merge' : ''}\n\n${c.subject}`;
+    return `<div class="lg-item${state.commit === c.sha ? ' act' : ''}" data-commit="${esc(c.sha)}" title="${esc(tip)}">` +
+      `<span class="lg-sha">${esc(c.sha.slice(0, 7))}</span><span class="lg-subj">${esc(c.subject)}</span>` +
+      `<span class="lg-meta">${esc(shortName(c.author))} · ${esc(ago(c.time))}</span></div>`;
+  };
+  el.innerHTML = `<div class="lg-head${state.logOpen ? '' : ' collapsed'}" data-commit="toggle" title="${esc(t('logTitle'))}">` +
+    `<span class="arrow">▾</span>${esc(t('commits'))} <span class="badge has">${cs.length}${state.log.more ? '+' : ''}</span>` +
+    (state.commit ? `<span class="lg-cur">${esc(state.commit.slice(0, 7))}</span>` : '') + '</div>' +
+    (state.logOpen ? `<div class="lg-list"><div class="lg-item lg-all${state.commit ? '' : ' act'}" data-commit="">${esc(t('allChanges'))}</div>` +
+      cs.map(item).join('') + '</div>' : '');
+  const act = el.querySelector('.lg-item.act');
+  if (act) act.scrollIntoView({ block: 'nearest' });
+}
+
 async function loadComments() {
   const r = await latest('comments', () => api('/api/comments').then(d => ({ d }), e => ({ e })));
   if (!r) return;
@@ -840,6 +901,7 @@ async function refresh() {
   // its scroll target would be lost – try again once it has loaded
   if (state.inflight) { scheduleRefresh(); return; }
   try { await loadInfo(); } catch { /* keep previous */ }
+  await loadLog();
   await Promise.all([loadFiles(), loadComments(), loadStatus()]);
   if (state.inflight) { scheduleRefresh(); return; }
   if (state.current && state.files.some(f => f.path === state.current)) {
@@ -1026,6 +1088,7 @@ function buildTree(files) {
 }
 
 function renderSidebar() {
+  renderLog();
   const sum = $('#summary');
   const tree = $('#tree');
   const c = state.compare;
@@ -1041,7 +1104,7 @@ function renderSidebar() {
   sum.innerHTML = `<b>${state.files.length}</b> ${t('files', state.files.length)} · <span class="stat"><span class="a">+${add}</span> <span class="d">−${del}</span></span>` +
     `<span class="lbl" title="${esc(sideLabel(c.left))}">◀ ${esc(sideLabel(c.left))}</span>` +
     `<span class="lbl" title="${esc(sideLabel(c.right))}">▶ ${esc(sideLabel(c.right))}</span>` +
-    (c.onBase ? `<span class="lbl err">${esc(t('onBase', c.base))}</span>` : '') + stashBoxHtml(c.stash);
+    (c.onBase && !c.commit ? `<span class="lbl err">${esc(t('onBase', c.base))}</span>` : '') + stashBoxHtml(c.stash) + commitBoxHtml(c.commit);
 
   const viewed = viewedMap();
   const counts = {};
@@ -1090,6 +1153,13 @@ function renderSidebar() {
   state.order = order;
 }
 
+function commitBoxHtml(cm) {
+  if (!cm) return '';
+  return `<div class="stash-box"><div><b>${esc(cm.sha.slice(0, 8))}</b> · ${esc(cm.author)} · ${esc(ago(cm.time))}</div>` +
+    `<div class="msg-line">${esc(cm.subject)}</div>` +
+    `<div class="stash-acts"><button data-commit="">${esc(t('allChanges'))}</button></div></div>`;
+}
+
 function stashBoxHtml(st) {
   if (!st) return '';
   const c = state.confirm;
@@ -1106,7 +1176,9 @@ function stashBoxHtml(st) {
 function applyMode() {
   const stash = !!stashSha();
   document.body.classList.toggle('stash-mode', stash);
-  for (const s of ['#opt-left', '#opt-right', '#btn-comments', '#btn-export', '#btn-copy']) $(s).disabled = stash;
+  document.body.classList.toggle('commit-mode', !!state.commit);
+  for (const s of ['#opt-left', '#opt-right']) $(s).disabled = stash;
+  for (const s of ['#btn-comments', '#btn-export', '#btn-copy']) $(s).disabled = readOnly();
   syncPickers();
 }
 
@@ -1265,7 +1337,7 @@ function renderCommentsPanel() {
 
 // ---- actions -----------------------------------------------------------------------------------
 function startComment(side, line) {
-  if (stashSha()) { toast(t('stashNoComments')); return; }
+  if (readOnly()) { toast(t(stashSha() ? 'stashNoComments' : 'commitNoComments')); return; }
   if (!state.diff || state.diff.file.path !== state.current) return; // a different file is loading
   state.editing = { side, line };
   state.draft = '';
@@ -1436,6 +1508,7 @@ async function changeOpts() {
   o.right = $('#opt-right').value;
   o.ws = $('#opt-ws').checked;
   for (const k of Object.keys(o)) LS.set(k, o[k]);
+  await loadLog();
   await loadFiles();
   const target = state.files.some(f => f.path === state.current) ? state.current : state.order[0];
   if (target) openFile(target);
@@ -1519,7 +1592,17 @@ function bindUI() {
   $('#cm-msg').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doCommit(); }
   });
+  const onCommitClick = e => {
+    const el = e.target.closest('[data-commit]');
+    if (!el) return false;
+    const v = el.dataset.commit;
+    if (v === 'toggle') { state.logOpen = !state.logOpen; LS.set('logOpen', state.logOpen); renderLog(); }
+    else selectCommit(v || null);
+    return true;
+  };
+  $('#log').addEventListener('click', onCommitClick);
   $('#summary').addEventListener('click', e => {
+    if (onCommitClick(e)) return;
     const b = e.target.closest('button[data-stash]');
     if (!b) return;
     const a = b.dataset.stash;
@@ -1660,6 +1743,8 @@ function bindUI() {
     if (e.key === 'F7') { e.preventDefault(); gotoChange(e.shiftKey ? -1 : 1); }
     else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoFile(1); }
     else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoFile(-1); }
+    else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); stepCommit(1); }
+    else if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); stepCommit(-1); }
   });
 
   // sidebar resizing
@@ -1702,7 +1787,7 @@ async function init() {
     renderMessage(`<span class="err">${esc(e.message)}</span>`);
     return;
   }
-  await Promise.all([loadComments(), loadFiles(), loadStatus()]);
+  await Promise.all([loadComments(), loadFiles(), loadStatus(), loadLog()]);
   const last = LS.get('file:' + state.info.root, null);
   const first = state.files.some(f => f.path === last) ? last : state.order[0];
   if (first) openFile(first);

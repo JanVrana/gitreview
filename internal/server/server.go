@@ -76,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/files", api(s.files))
 	mux.Handle("GET /api/diff", api(s.diff))
 	mux.Handle("GET /api/blame", api(s.blame))
+	mux.Handle("GET /api/log", api(s.log))
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.Handle("GET /api/comments", api(s.commentList))
 	mux.Handle("POST /api/comments", api(s.commentAdd))
@@ -206,9 +207,47 @@ type compare struct {
 	Stash   *git.Stash `json:"stash,omitempty"` // browsing a stash instead of the branch
 	// RightBranch: the right side is another branch, not the checked-out one.
 	RightBranch bool `json:"rightBranch,omitempty"`
+	// Commit: a single commit of the branch log is shown (against its first
+	// parent) instead of the whole range.
+	Commit *git.Commit `json:"commit,omitempty"`
 }
 
 func (s *Server) resolve(r *http.Request) (*compare, error) {
+	c, err := s.resolveRange(r)
+	if err != nil || r.URL.Query().Get("commit") == "" {
+		return c, err
+	}
+	return s.resolveCommit(c, r.URL.Query().Get("commit"))
+}
+
+// resolveCommit narrows a comparison to one commit of its log, compared with
+// its first parent.
+func (s *Server) resolveCommit(c *compare, sha string) (*compare, error) {
+	if c.Stash != nil || !shaRe.MatchString(sha) {
+		return nil, badRequest(errors.New("invalid commit"))
+	}
+	if full, err := s.repo.Verify(sha); err != nil || full != sha {
+		return nil, httpError{http.StatusNotFound, errors.New("the commit does not exist")}
+	}
+	cm, err := s.repo.CommitInfo(sha)
+	if err != nil {
+		return nil, err
+	}
+	parent := s.repo.FirstParent(sha)
+	plabel := git.ShortSha(sha) + "^"
+	if parent == git.EmptyTree {
+		plabel = "∅"
+	}
+	c.Commit = &cm
+	c.OnBase = false
+	c.Left = side{Rev: parent, Label: plabel}
+	c.Right = side{Rev: sha, Label: fmt.Sprintf("%s %s", git.ShortSha(sha), cm.Subject)}
+	return c, nil
+}
+
+// resolveRange resolves the comparison of the branch (or a stash) without
+// narrowing it to one commit.
+func (s *Server) resolveRange(r *http.Request) (*compare, error) {
 	q := r.URL.Query()
 	if sha := q.Get("stash"); sha != "" {
 		return s.resolveStash(sha, q.Get("ws") == "1")
@@ -304,7 +343,7 @@ func (s *Server) changed(r *http.Request) (*compare, []git.FileChange, error) {
 		return nil, nil, err
 	}
 	pending := map[string]git.Pending{}
-	if !c.RightBranch { // uncommitted changes belong to the checked-out branch
+	if !c.RightBranch && c.Commit == nil { // uncommitted changes belong to the checked-out branch
 		pending, _ = s.repo.Uncommitted()
 	}
 	out := make([]git.FileChange, 0, len(files))
