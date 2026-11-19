@@ -131,7 +131,7 @@ Further protections, also active with `-no-auth`:
   - the *Against* and *Right* pickers group **local** and **remote** branches (and stashes) and are **searchable**: type any parts of the name (`xor exp` finds `origin/jira/XOR-2048-export`), ↑/↓ and Enter pick, Esc closes,
   - an *ignore whitespace* toggle.
 - **Fetch:** runs `git fetch --all --prune` and fast-forwards the local `develop` / `master` / `main` (and the selected base) to their remote-tracking branches, so you compare against the current remote state, not a stale local copy. A branch with local commits or one that is checked out is left alone and reported. When the local base is behind its remote (as of the last fetch), `↓N` appears next to the base selector. Fetch needs non-interactive credentials (ssh agent, credential helper); it never prompts.
-- **Commit log:** above the file tree, the commits of the compared range (since the merge-base) with author and age. Click one (or Alt+← / Alt+→) to see only that commit's changes against its parent; *All changes* returns to the whole comparison. Comments are off while viewing a single commit. If the commit disappears (amend, rebase), the view falls back to all changes.
+- **Commit log:** above the file tree, the commits of the compared range (since the merge-base) with author and age. Click one (or Alt+← / Alt+→) to see only that commit's changes against its parent. **Shift+click** another commit to see everything that changed between them (from the older one inclusive up to the newer one); Shift+click *All changes* to compare a commit with the right side (e.g. the working tree). *All changes* returns to the whole comparison. Comments are off while viewing commits of the log. If the commit disappears (amend, rebase), the view falls back to all changes.
 - **File tree:** IntelliJ-style status colors, +/− line counts and a "reviewed" checkbox that clears itself when the file changes again.
 - **Diff:**
   - aligned change blocks with similar lines paired, changed words highlighted and syntax highlighting (highlight.js),
@@ -166,7 +166,7 @@ Only one git operation runs at a time. Commits use your normal git identity and 
 |---|---|
 | F7 / Shift+F7 | next / previous change (continues into the next file) |
 | Alt+↓ / Alt+↑ | next / previous file |
-| Alt+← / Alt+→ | older / newer commit of the log (newest end = all changes) |
+| Alt+← / Alt+→ | older / newer commit of the log (newest end = all changes); with Shift the selected range changes |
 | click a line number | add a comment |
 | Ctrl+Enter / Esc | save / cancel a comment |
 | Shift+wheel | scroll the side under the cursor horizontally |

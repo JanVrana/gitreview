@@ -504,3 +504,4 @@ tr.crow td.mid { padding: 0; background: var(--panel-2); }
 .lg-sha { font-family: var(--code-font); color: var(--accent); flex: none; }
 .lg-subj { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
 .lg-meta { flex: none; color: var(--fg-dim); font-size: 0.9em; }
+.lg-to { color: var(--fg-dim); margin: -2px 0 2px; }

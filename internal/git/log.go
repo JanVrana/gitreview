@@ -72,3 +72,9 @@ func parseCommit(rec string) (Commit, bool) {
 	c.Time, _ = strconv.ParseInt(f[3], 10, 64)
 	return c, true
 }
+
+// IsAncestor tells whether commit a is an ancestor of (or equal to) b.
+func (r *Repo) IsAncestor(a, b string) bool {
+	_, err := r.run("merge-base", "--is-ancestor", a, b)
+	return err == nil
+}

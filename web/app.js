@@ -44,7 +44,9 @@ const state = {
   pending: { head: '', files: [] }, // uncommitted files (commit panel)
   cmUnchecked: new Set(), // files the user excluded from the commit
   cmHead: null,            // HEAD the open commit panel was reviewed against
-  commit: null,         // sha of the one commit of the branch log being shown, null = all changes
+  // selection in the branch log: its two ends (commit sha, null = the "all
+  // changes" row, i.e. the right side); both null = the whole comparison
+  sel: { anchor: null, end: null },
   log: { commits: [], more: false }, // commits of the compared range
   logOpen: LS.get('logOpen', true),
   confirm: null,        // pending confirmation: {kind: 'revert', path} | {kind: 'stash', action}
@@ -72,7 +74,19 @@ const stashSha = () => state.opts.base.startsWith('stash:') ? state.opts.base.sl
 
 /* Comments belong to the whole comparison: not while browsing a stash or a
    single commit, whose line numbers differ. */
-const readOnly = () => !!stashSha() || !!state.commit;
+const readOnly = () => !!stashSha() || !!selRange();
+
+/* The selected part of the log, or null for the whole comparison:
+   commit = newest end (null = up to the right side), since = oldest end
+   (null = just that one commit), n = commits in the range. */
+function selRange() {
+  const list = [null, ...state.log.commits.map(c => c.sha)];
+  const a = list.indexOf(state.sel.anchor), b = list.indexOf(state.sel.end);
+  if (a < 0 || b < 0) return null;
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  if (hi === 0) return null;
+  return { lo, hi, commit: list[lo], since: lo === hi ? null : list[hi], n: hi - Math.max(lo, 1) + 1 };
+}
 
 /* whole = the range itself, never narrowed to the selected commit */
 function compareParams(extra = {}, whole = false) {
@@ -80,7 +94,9 @@ function compareParams(extra = {}, whole = false) {
   const sh = stashSha();
   if (sh) return new URLSearchParams({ stash: sh, ws: o.ws ? '1' : '0', ...extra }).toString();
   const p = { base: o.base, left: o.left, right: o.right, ws: o.ws ? '1' : '0' };
-  if (state.commit && !whole) p.commit = state.commit;
+  const r = whole ? null : selRange();
+  if (r && r.commit) p.commit = r.commit;
+  if (r && r.since) p.since = r.since;
   return new URLSearchParams({ ...p, ...extra }).toString();
 }
 
@@ -753,18 +769,21 @@ async function loadFiles() {
 /* The commits of the compared range; a selected commit that is gone (amend,
    rebase, other range) falls back to all changes. */
 async function loadLog() {
-  if (stashSha()) { state.log = { commits: [], more: false }; state.commit = null; return; }
+  if (stashSha()) { state.log = { commits: [], more: false }; state.sel = { anchor: null, end: null }; return; }
   const r = await latest('log', () => api('/api/log?' + compareParams({}, true)).then(d => ({ d }), e => ({ e })));
   if (!r) return;
   state.log = r.e ? { commits: [], more: false } : r.d;
-  if (state.commit && !state.log.commits.some(c => c.sha === state.commit)) state.commit = null;
+  const gone = sha => sha && !state.log.commits.some(c => c.sha === sha);
+  if (gone(state.sel.anchor) || gone(state.sel.end)) state.sel = { anchor: null, end: null };
   applyMode();
   renderLog();
 }
 
-async function selectCommit(sha) {
-  if (state.commit === sha) return;
-  state.commit = sha;
+/* Select the log rows from anchor to end (shas, null = "all changes"). */
+async function selectLog(anchor, end = anchor) {
+  const before = compareParams();
+  state.sel = { anchor, end };
+  if (compareParams() === before) { renderLog(); return; }
   applyMode();
   await loadFiles();
   const target = state.files.some(f => f.path === state.current) ? state.current : state.order[0];
@@ -772,13 +791,16 @@ async function selectCommit(sha) {
   else { state.current = null; state.diff = null; renderHeader(); renderMessage(state.error ? `<span class="err">${esc(state.error)}</span>` : t('noChanges')); }
 }
 
-/* Alt+← / Alt+→: older / newer commit ("all changes" is the newest end). */
-function stepCommit(dir) {
+/* Alt+← / Alt+→: older / newer commit ("all changes" is the newest end);
+   with Shift the far end of the selection moves and the range grows. */
+function stepCommit(dir, extend) {
   const list = [null, ...state.log.commits.map(c => c.sha)];
   if (list.length < 2) return;
-  const i = list.indexOf(state.commit);
+  const i = Math.max(0, list.indexOf(state.sel.end));
   const j = Math.max(0, Math.min(list.length - 1, i + dir));
-  if (j !== i) selectCommit(list[j]);
+  if (j === i) return;
+  if (extend) selectLog(state.sel.anchor, list[j]);
+  else selectLog(list[j]);
 }
 
 function renderLog() {
@@ -786,16 +808,18 @@ function renderLog() {
   const cs = state.log.commits;
   if (stashSha() || !cs.length) { el.innerHTML = ''; el.hidden = true; return; }
   el.hidden = false;
+  const r = selRange();
+  const inSel = i => r ? i >= r.lo && i <= r.hi : i === 0; // i: row index, 0 = all changes
   const item = (c, i) => {
     const tip = `${c.sha}\n${c.author} · ${new Date(c.time * 1000).toLocaleString(uiLang)}${c.parents.length > 1 ? ' · merge' : ''}\n\n${c.subject}`;
-    return `<div class="lg-item${state.commit === c.sha ? ' act' : ''}" data-commit="${esc(c.sha)}" title="${esc(tip)}">` +
+    return `<div class="lg-item${inSel(i + 1) ? ' act' : ''}" data-commit="${esc(c.sha)}" title="${esc(tip)}">` +
       `<span class="lg-sha">${esc(c.sha.slice(0, 7))}</span><span class="lg-subj">${esc(c.subject)}</span>` +
       `<span class="lg-meta">${esc(shortName(c.author))} · ${esc(ago(c.time))}</span></div>`;
   };
   el.innerHTML = `<div class="lg-head${state.logOpen ? '' : ' collapsed'}" data-commit="toggle" title="${esc(t('logTitle'))}">` +
     `<span class="arrow">▾</span>${esc(t('commits'))} <span class="badge has">${cs.length}${state.log.more ? '+' : ''}</span>` +
-    (state.commit ? `<span class="lg-cur">${esc(state.commit.slice(0, 7))}</span>` : '') + '</div>' +
-    (state.logOpen ? `<div class="lg-list"><div class="lg-item lg-all${state.commit ? '' : ' act'}" data-commit="">${esc(t('allChanges'))}</div>` +
+    (r ? `<span class="lg-cur">${esc(r.since ? t('nCommits', r.n) : r.commit.slice(0, 7))}</span>` : '') + '</div>' +
+    (state.logOpen ? `<div class="lg-list"><div class="lg-item lg-all${inSel(0) ? ' act' : ''}" data-commit="" title="${esc(t('allChangesTitle'))}">${esc(t('allChanges'))}</div>` +
       cs.map(item).join('') + '</div>' : '');
   const act = el.querySelector('.lg-item.act');
   if (act) act.scrollIntoView({ block: 'nearest' });
@@ -1104,7 +1128,7 @@ function renderSidebar() {
   sum.innerHTML = `<b>${state.files.length}</b> ${t('files', state.files.length)} · <span class="stat"><span class="a">+${add}</span> <span class="d">−${del}</span></span>` +
     `<span class="lbl" title="${esc(sideLabel(c.left))}">◀ ${esc(sideLabel(c.left))}</span>` +
     `<span class="lbl" title="${esc(sideLabel(c.right))}">▶ ${esc(sideLabel(c.right))}</span>` +
-    (c.onBase && !c.commit ? `<span class="lbl err">${esc(t('onBase', c.base))}</span>` : '') + stashBoxHtml(c.stash) + commitBoxHtml(c.commit);
+    (c.onBase && !c.commit && !c.since ? `<span class="lbl err">${esc(t('onBase', c.base))}</span>` : '') + stashBoxHtml(c.stash) + commitBoxHtml(c);
 
   const viewed = viewedMap();
   const counts = {};
@@ -1153,10 +1177,16 @@ function renderSidebar() {
   state.order = order;
 }
 
-function commitBoxHtml(cm) {
-  if (!cm) return '';
-  return `<div class="stash-box"><div><b>${esc(cm.sha.slice(0, 8))}</b> · ${esc(cm.author)} · ${esc(ago(cm.time))}</div>` +
-    `<div class="msg-line">${esc(cm.subject)}</div>` +
+function commitBoxHtml(c) {
+  const cm = c.commit, since = c.since;
+  if (!cm && !since) return '';
+  const r = selRange();
+  const line = x => `<div class="msg-line"><b>${esc(x.sha.slice(0, 8))}</b> ${esc(x.subject)}</div>`;
+  const head = since
+    ? `<div>${esc(t('rangeTitle', r ? r.n : 0))}</div>` + line(since) +
+      `<div class="lg-to">${cm ? '↓' : '↓ ' + esc(sideLabel(c.right))}</div>` + (cm ? line(cm) : '')
+    : `<div><b>${esc(cm.sha.slice(0, 8))}</b> · ${esc(cm.author)} · ${esc(ago(cm.time))}</div>` + `<div class="msg-line">${esc(cm.subject)}</div>`;
+  return `<div class="stash-box">${head}` +
     `<div class="stash-acts"><button data-commit="">${esc(t('allChanges'))}</button></div></div>`;
 }
 
@@ -1176,7 +1206,7 @@ function stashBoxHtml(st) {
 function applyMode() {
   const stash = !!stashSha();
   document.body.classList.toggle('stash-mode', stash);
-  document.body.classList.toggle('commit-mode', !!state.commit);
+  document.body.classList.toggle('commit-mode', !!selRange());
   for (const s of ['#opt-left', '#opt-right']) $(s).disabled = stash;
   for (const s of ['#btn-comments', '#btn-export', '#btn-copy']) $(s).disabled = readOnly();
   syncPickers();
@@ -1597,7 +1627,8 @@ function bindUI() {
     if (!el) return false;
     const v = el.dataset.commit;
     if (v === 'toggle') { state.logOpen = !state.logOpen; LS.set('logOpen', state.logOpen); renderLog(); }
-    else selectCommit(v || null);
+    else if (e.shiftKey && el.closest('#log')) { e.preventDefault(); selectLog(state.sel.anchor, v || null); }
+    else selectLog(v || null);
     return true;
   };
   $('#log').addEventListener('click', onCommitClick);
@@ -1743,8 +1774,8 @@ function bindUI() {
     if (e.key === 'F7') { e.preventDefault(); gotoChange(e.shiftKey ? -1 : 1); }
     else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoFile(1); }
     else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoFile(-1); }
-    else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); stepCommit(1); }
-    else if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); stepCommit(-1); }
+    else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); stepCommit(1, e.shiftKey); }
+    else if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); stepCommit(-1, e.shiftKey); }
   });
 
   // sidebar resizing

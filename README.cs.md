@@ -120,7 +120,7 @@ Otevřené stránky se samy znovu připojí a načtou novou verzi. Pokud zrovna 
   - výběry *Proti* a *Vpravo* dělí větve na **lokální** a **remote** (a stashe) a dají se **prohledávat psaním**: stačí libovolné části názvu (`xor exp` najde `origin/jira/XOR-2048-export`), ↑/↓ a Enter vybere, Esc zavře,
   - přepínač *Ignorovat mezery*.
 - **Fetch:** spustí `git fetch --all --prune` a fast-forwardne lokální `develop` / `master` / `main` (a zvolenou base) na stav z remote, takže porovnáváš proti aktuální podobě větve na remote, ne proti staré lokální kopii. Větev s lokálními commity nebo právě checkoutnutou nechá být a nahlásí to. Když je lokální base pozadu za remote (podle posledního fetche), ukáže se u výběru větve `↓N`. Fetch potřebuje neinteraktivní přihlášení (ssh agent, credential helper), na heslo se nikdy neptá.
-- **Log commitů:** nad stromem souborů jsou commity porovnávaného rozsahu (od merge-base) s autorem a stářím. Klikem (nebo Alt+← / Alt+→) zobrazíš jen změny jednoho commitu proti jeho rodiči; *Všechny změny* vrátí celé porovnání. Při zobrazení jednoho commitu nejde komentovat. Když commit zmizí (amend, rebase), zobrazení se vrátí na všechny změny.
+- **Log commitů:** nad stromem souborů jsou commity porovnávaného rozsahu (od merge-base) s autorem a stářím. Klikem (nebo Alt+← / Alt+→) zobrazíš jen změny jednoho commitu proti jeho rodiči. **Shift+klik** na další commit ukáže vše, co přibylo mezi nimi (od staršího včetně po novější); Shift+klik na *Všechny změny* porovná commit s pravou stranou (třeba s pracovní kopií). *Všechny změny* vrátí celé porovnání. Při zobrazení commitů z logu nejde komentovat. Když commit zmizí (amend, rebase), zobrazení se vrátí na všechny změny.
 - **Seznam souborů:** strom souborů s barvami stavů jako v IntelliJ, počty +/− a checkbox „zkontrolováno“. Ten se sám zruší, když se soubor znovu změní.
 - **Diff:**
   - zarovnané bloky změn se zvýrazněním změněných slov a zvýrazněním syntaxe (highlight.js),
@@ -157,7 +157,7 @@ Najednou běží vždy jen jedna git operace. Commity používají tvoji běžno
 |---|---|
 | F7 / Shift+F7 | další / předchozí změna (na konci souboru přejde na další soubor) |
 | Alt+↓ / Alt+↑ | další / předchozí soubor |
-| Alt+← / Alt+→ | starší / novější commit z logu (nejnovější konec = všechny změny) |
+| Alt+← / Alt+→ | starší / novější commit z logu (nejnovější konec = všechny změny); se Shiftem mění vybraný rozsah |
 | Ctrl+Enter / Esc | uložit / zrušit komentář |
 | Shift+kolečko | horizontální scroll strany pod kurzorem |
 

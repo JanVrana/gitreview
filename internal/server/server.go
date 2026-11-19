@@ -210,38 +210,73 @@ type compare struct {
 	// Commit: a single commit of the branch log is shown (against its first
 	// parent) instead of the whole range.
 	Commit *git.Commit `json:"commit,omitempty"`
+	// Since: the range starts at this commit (inclusive) instead of the
+	// merge-base; up to Commit, or up to the right side when Commit is nil.
+	Since *git.Commit `json:"since,omitempty"`
 }
 
 func (s *Server) resolve(r *http.Request) (*compare, error) {
 	c, err := s.resolveRange(r)
-	if err != nil || r.URL.Query().Get("commit") == "" {
+	q := r.URL.Query()
+	if err != nil || (q.Get("commit") == "" && q.Get("since") == "") {
 		return c, err
 	}
-	return s.resolveCommit(c, r.URL.Query().Get("commit"))
+	return s.resolveCommits(c, q.Get("commit"), q.Get("since"))
 }
 
-// resolveCommit narrows a comparison to one commit of its log, compared with
-// its first parent.
-func (s *Server) resolveCommit(c *compare, sha string) (*compare, error) {
-	if c.Stash != nil || !shaRe.MatchString(sha) {
-		return nil, badRequest(errors.New("invalid commit"))
+// lookupCommit validates a full commit sha from the query.
+func (s *Server) lookupCommit(sha string) (git.Commit, error) {
+	if !shaRe.MatchString(sha) {
+		return git.Commit{}, badRequest(errors.New("invalid commit"))
 	}
 	if full, err := s.repo.Verify(sha); err != nil || full != sha {
-		return nil, httpError{http.StatusNotFound, errors.New("the commit does not exist")}
+		return git.Commit{}, httpError{http.StatusNotFound, errors.New("the commit does not exist")}
 	}
-	cm, err := s.repo.CommitInfo(sha)
+	return s.repo.CommitInfo(sha)
+}
+
+// resolveCommits narrows a comparison to commits of its log:
+//   - commit alone: that commit against its first parent,
+//   - since (and commit): everything from since (inclusive) up to commit,
+//     or up to the right side of the comparison when commit is empty.
+func (s *Server) resolveCommits(c *compare, commit, since string) (*compare, error) {
+	if c.Stash != nil {
+		return nil, badRequest(errors.New("a stash has no commits to choose"))
+	}
+	if commit != "" {
+		cm, err := s.lookupCommit(commit)
+		if err != nil {
+			return nil, err
+		}
+		c.Commit = &cm
+		c.OnBase = false
+		c.Right = side{Rev: cm.Sha, Label: fmt.Sprintf("%s %s", git.ShortSha(cm.Sha), cm.Subject)}
+		if since == "" {
+			since = commit
+		}
+	}
+	sc, err := s.lookupCommit(since)
 	if err != nil {
 		return nil, err
 	}
-	parent := s.repo.FirstParent(sha)
-	plabel := git.ShortSha(sha) + "^"
-	if parent == git.EmptyTree {
-		plabel = "∅"
+	tip := c.Right.Rev
+	if tip == "" {
+		tip = s.repo.Head().Sha
 	}
-	c.Commit = &cm
+	if !s.repo.IsAncestor(sc.Sha, tip) {
+		return nil, badRequest(errors.New("the first commit of the range is not an ancestor of the last one"))
+	}
+	parent := s.repo.FirstParent(sc.Sha)
+	label := git.ShortSha(sc.Sha) + "^"
+	if parent == git.EmptyTree {
+		label = "∅"
+	}
+	if since != commit {
+		c.Since = &sc
+		label += " (" + sc.Subject + ")"
+	}
 	c.OnBase = false
-	c.Left = side{Rev: parent, Label: plabel}
-	c.Right = side{Rev: sha, Label: fmt.Sprintf("%s %s", git.ShortSha(sha), cm.Subject)}
+	c.Left = side{Rev: parent, Label: label}
 	return c, nil
 }
 

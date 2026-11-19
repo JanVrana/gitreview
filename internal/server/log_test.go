@@ -68,3 +68,57 @@ func TestLogAndCommit(t *testing.T) {
 		}
 	}
 }
+
+// since= starts the comparison at a commit of the log: up to another commit,
+// or up to the working tree.
+func TestCommitRange(t *testing.T) {
+	ts, dir := newTest(t)
+	testrepo.Write(t, dir, "second.txt", "two\n")
+	testrepo.Git(t, dir, "add", "second.txt")
+	testrepo.Git(t, dir, "commit", "-q", "-m", "second commit")
+	testrepo.Write(t, dir, "third.txt", "three\n")
+	testrepo.Git(t, dir, "add", "third.txt")
+	testrepo.Git(t, dir, "commit", "-q", "-m", "third commit")
+
+	var lg struct{ Commits []git.Commit }
+	get(t, ts, "/api/log?base=develop", &lg)
+	if len(lg.Commits) != 3 {
+		t.Fatalf("log: %+v", lg)
+	}
+	third, second, first := lg.Commits[0], lg.Commits[1], lg.Commits[2]
+	var res struct {
+		Compare compare
+		Files   []git.FileChange
+	}
+	paths := func() string {
+		var p []string
+		for _, f := range res.Files {
+			u := ""
+			if f.Uncommitted {
+				u = "*"
+			}
+			p = append(p, f.Path+u)
+		}
+		return strings.Join(p, ",")
+	}
+
+	// second..third: two commits together
+	if code := get(t, ts, "/api/files?base=develop&commit="+third.Sha+"&since="+second.Sha, &res); code != 200 {
+		t.Fatalf("range: %d", code)
+	}
+	if got := paths(); got != "second.txt,third.txt" || res.Compare.Left.Rev != first.Sha || res.Compare.Since == nil || res.Compare.Commit == nil {
+		t.Fatalf("range: %s %+v", got, res.Compare)
+	}
+	// since third up to the working tree: third.txt and the uncommitted files
+	res.Compare, res.Files = compare{}, nil
+	if code := get(t, ts, "/api/files?base=develop&since="+third.Sha, &res); code != 200 {
+		t.Fatalf("since: %d", code)
+	}
+	if got := paths(); got != "bin.dat*,main.go*,third.txt,nový soubor.txt*" || res.Compare.Right.Rev != "" || res.Compare.Commit != nil {
+		t.Fatalf("since: %s", got)
+	}
+	// the range must go forward
+	if code := get(t, ts, "/api/files?base=develop&commit="+second.Sha+"&since="+third.Sha, nil); code != 400 {
+		t.Errorf("backwards range: %d, want 400", code)
+	}
+}
