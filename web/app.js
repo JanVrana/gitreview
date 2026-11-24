@@ -113,8 +113,14 @@ function toast(text, isErr = false, ms = isErr ? 6000 : 3500, action = null) {
   }
   t.className = isErr ? 'err' : '';
   t.hidden = false;
+  // a failed git command is shown in full ("$ git …") to be copied and retried:
+  // leave time for that, and never hide while the mouse is over it
+  if (isErr && text.includes('\n$ ')) ms = Math.max(ms, 60000);
+  const hide = () => { toastTimer = setTimeout(() => { t.hidden = true; }, ms); };
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
+  t.onmouseenter = () => clearTimeout(toastTimer);
+  t.onmouseleave = hide;
+  hide();
 }
 
 function fmtSize(n) {

@@ -66,6 +66,14 @@ func (r *Repo) runTimeout(timeout time.Duration, args ...string) ([]byte, error)
 	}
 	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	shown := "git " + shellJoin(append(base, args...))
+	if networkCmd[args[0]] {
+		if sock := agentSocket(); sock != "" {
+			cmd.Env = append(cmd.Env, "SSH_AUTH_SOCK="+sock)
+		}
+		// the agent actually used, so the command can be retried as shown
+		shown = "SSH_AUTH_SOCK=" + shellQuote(envValue(cmd.Env, "SSH_AUTH_SOCK")) + " " + shown
+	}
 	detach(cmd) // no controlling terminal: ssh cannot prompt for a passphrase and hang
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -75,12 +83,44 @@ func (r *Repo) runTimeout(timeout time.Duration, args ...string) ([]byte, error)
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+		return nil, fmt.Errorf("%s\n$ %s", msg, shown)
 	}
 	return stdout.Bytes(), nil
 }
 
 var refPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@{}^~\-]*$`)
+
+// networkCmd are the git commands that talk to remotes (and may need ssh).
+var networkCmd = map[string]bool{"fetch": true, "push": true, "pull": true}
+
+// envValue returns the last value of key in env ("" if unset).
+func envValue(env []string, key string) string {
+	v := ""
+	for _, e := range env {
+		if k, val, ok := strings.Cut(e, "="); ok && k == key {
+			v = val
+		}
+	}
+	return v
+}
+
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// shellQuote quotes s for a POSIX shell when needed.
+func shellQuote(s string) string {
+	if shellSafe.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func shellJoin(args []string) string {
+	q := make([]string, len(args))
+	for i, a := range args {
+		q[i] = shellQuote(a)
+	}
+	return strings.Join(q, " ")
+}
 
 // ValidRef reports whether s is syntactically safe to pass to git as a revision.
 func ValidRef(s string) bool {

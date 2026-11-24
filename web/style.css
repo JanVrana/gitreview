@@ -393,7 +393,7 @@ tr.crow td.mid { padding: 0; background: var(--panel-2); }
   background: var(--panel); color: var(--fg-strong); border: 1px solid var(--border);
   padding: 8px 16px; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.3); max-width: 80vw;
 }
-#toast.err { border-color: var(--c-stale); }
+#toast.err { border-color: var(--c-stale); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 #toast button { margin-left: 10px; }
 #measure { position: absolute; visibility: hidden; white-space: pre; top: -100px; }
 
